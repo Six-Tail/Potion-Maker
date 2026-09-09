@@ -1,0 +1,215 @@
+extends Node
+## 게임 전역 상태: 항아리 재료, 제작 진행, 보관함, 도감, 등록된 앱, 설정.
+## 오토로드 싱글턴(GameState). user://save.json 에 저장.
+
+signal jar_changed
+signal brew_changed
+signal inventory_changed
+signal apps_changed
+
+const SAVE_PATH := "user://save.json"
+const MAX_INGREDIENTS := 3
+
+# 항아리에 담긴 재료 id 목록 (제작 시작 전)
+var jar_ingredients: Array = []
+
+# 진행 중인 제작. 없으면 null.
+# { ings:Array, minutes:float, target_sec:float, acc_sec:float, active:bool, started:int }
+var brew = null
+
+# 보관함: potion_id -> { name, color(rgba array), desc, count }
+var inventory: Dictionary = {}
+
+# 발견한 레시피 id 목록 (도감)
+var discovered: Array = []
+
+# 등록된 앱: [{ name:String(소문자 프로세스명), title:String }]
+var registered_apps: Array = []
+
+# 설정
+var time_scale: float = 1.0        # 제작 속도 배율(테스트용)
+var force_active: bool = false      # true 면 PC 사용 여부와 무관하게 항상 진행
+
+func _ready() -> void:
+	load_game()
+
+func _exit_tree() -> void:
+	save_game()
+
+# ---------- 항아리 ----------
+func add_ingredient(id: String) -> bool:
+	if brew != null:
+		return false
+	if jar_ingredients.size() >= MAX_INGREDIENTS:
+		return false
+	jar_ingredients.append(id)
+	jar_changed.emit()
+	save_game()
+	return true
+
+func remove_ingredient_at(idx: int) -> void:
+	if brew != null:
+		return
+	if idx >= 0 and idx < jar_ingredients.size():
+		jar_ingredients.remove_at(idx)
+		jar_changed.emit()
+		save_game()
+
+func clear_jar() -> void:
+	if brew != null:
+		return
+	jar_ingredients.clear()
+	jar_changed.emit()
+	save_game()
+
+# ---------- 제작 ----------
+func start_brew(minutes: float) -> bool:
+	if brew != null or jar_ingredients.is_empty():
+		return false
+	brew = {
+		"ings": jar_ingredients.duplicate(),
+		"minutes": minutes,
+		"target_sec": minutes * 60.0,
+		"acc_sec": 0.0,
+		"active": false,
+		"started": Time.get_unix_time_from_system(),
+	}
+	jar_ingredients = []
+	jar_changed.emit()
+	brew_changed.emit()
+	save_game()
+	return true
+
+func cancel_brew() -> void:
+	if brew == null:
+		return
+	# 재료를 항아리로 돌려준다.
+	jar_ingredients = brew.ings.duplicate()
+	brew = null
+	jar_changed.emit()
+	brew_changed.emit()
+	save_game()
+
+## main 의 타이머가 매 틱 호출. dt(초, 배율 미적용), active(현재 PC 사용 중인지).
+func tick_brew(dt: float, active: bool) -> void:
+	if brew == null:
+		return
+	brew.active = active
+	if active:
+		brew.acc_sec += dt * time_scale
+		if brew.acc_sec >= brew.target_sec:
+			_complete_brew()
+
+func _complete_brew() -> void:
+	var result: Dictionary = Recipes.resolve(brew.ings, brew.minutes)
+	_add_potion(result)
+	brew = null
+	brew_changed.emit()
+	save_game()
+
+func brew_progress() -> float:
+	if brew == null:
+		return 0.0
+	return clampf(brew.acc_sec / maxf(brew.target_sec, 0.001), 0.0, 1.0)
+
+func brew_remaining_sec() -> float:
+	if brew == null:
+		return 0.0
+	return maxf(brew.target_sec - brew.acc_sec, 0.0)
+
+# ---------- 보관함 / 도감 ----------
+func _add_potion(p: Dictionary) -> void:
+	var id: String = p.id
+	if inventory.has(id):
+		inventory[id].count += 1
+	else:
+		inventory[id] = {
+			"name": p.name,
+			"color": _color_to_arr(p.color),
+			"desc": p.get("desc", ""),
+			"count": 1,
+		}
+	if id != "unknown" and id != "failure" and not discovered.has(id):
+		discovered.append(id)
+	inventory_changed.emit()
+
+func take_potion(id: String) -> void:
+	if inventory.has(id):
+		inventory[id].count -= 1
+		if inventory[id].count <= 0:
+			inventory.erase(id)
+		inventory_changed.emit()
+		save_game()
+
+# ---------- 등록된 앱 ----------
+func is_app_registered(pname: String) -> bool:
+	var low := pname.to_lower()
+	for a in registered_apps:
+		if a.name == low:
+			return true
+	return false
+
+func add_app(pname: String, title: String) -> bool:
+	if pname.strip_edges() == "":
+		return false
+	var low := pname.to_lower()
+	if is_app_registered(low):
+		return false
+	registered_apps.append({"name": low, "title": title})
+	apps_changed.emit()
+	save_game()
+	return true
+
+func remove_app_at(idx: int) -> void:
+	if idx >= 0 and idx < registered_apps.size():
+		registered_apps.remove_at(idx)
+		apps_changed.emit()
+		save_game()
+
+# ---------- 저장 / 불러오기 ----------
+func _color_to_arr(c: Color) -> Array:
+	return [c.r, c.g, c.b, c.a]
+
+func arr_to_color(a) -> Color:
+	if typeof(a) == TYPE_ARRAY and a.size() >= 3:
+		return Color(a[0], a[1], a[2], a[3] if a.size() > 3 else 1.0)
+	return Color.WHITE
+
+func save_game() -> void:
+	var data := {
+		"jar": jar_ingredients,
+		"brew": brew,
+		"inventory": inventory,
+		"discovered": discovered,
+		"apps": registered_apps,
+		"time_scale": time_scale,
+		"force_active": force_active,
+	}
+	var f := FileAccess.open(SAVE_PATH, FileAccess.WRITE)
+	if f:
+		f.store_string(JSON.stringify(data, "\t"))
+		f.close()
+
+func load_game() -> void:
+	if not FileAccess.file_exists(SAVE_PATH):
+		return
+	var f := FileAccess.open(SAVE_PATH, FileAccess.READ)
+	if f == null:
+		return
+	var txt := f.get_as_text()
+	f.close()
+	var data = JSON.parse_string(txt)
+	if typeof(data) != TYPE_DICTIONARY:
+		return
+	jar_ingredients = data.get("jar", [])
+	brew = data.get("brew", null)
+	inventory = data.get("inventory", {})
+	discovered = data.get("discovered", [])
+	registered_apps = data.get("apps", [])
+	time_scale = float(data.get("time_scale", 1.0))
+	force_active = bool(data.get("force_active", false))
+	# brew 내부 숫자값들이 JSON 파싱으로 float 이 되도록 보정
+	if brew != null:
+		brew.minutes = float(brew.get("minutes", 1.0))
+		brew.target_sec = float(brew.get("target_sec", 60.0))
+		brew.acc_sec = float(brew.get("acc_sec", 0.0))

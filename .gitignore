@@ -1,0 +1,16 @@
+# Godot 4+ 엔진 임포트 캐시
+.godot/
+
+# Godot 엔진 실행 파일 (용량이 커서 GitHub 100MB 제한 초과 → 제외)
+Godot_v*.exe
+
+# 내보내기 결과물
+/build/
+/export/
+*.pck
+*.zip
+
+# OS / 에디터 부산물
+.DS_Store
+Thumbs.db
+desktop.ini
