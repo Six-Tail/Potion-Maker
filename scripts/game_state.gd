@@ -159,10 +159,11 @@ func tick_brew(dt: float, active: bool) -> void:
 
 func _complete_brew() -> void:
 	var result: Dictionary = Recipes.resolve(brew.ings, brew.minutes)
-	# 등급 판정: 실패작/정체불명은 항상 일반, 그 외는 시간에 따라 확률적으로.
+	# 등급 판정: 실패작/정체불명은 항상 일반, 그 외는 레시피 시간범위 안에서의
+	# 설정시간 위치에 따라 확률적으로(범위 안에서 더 오래 끓일수록 상위 등급↑).
 	var grade := 0
 	if result.id != "unknown" and result.id != "failure":
-		grade = Recipes.roll_grade(brew.minutes)
+		grade = Recipes.roll_grade_for(brew.minutes, float(result.get("min", 1)), float(result.get("max", 1)))
 	last_made_name = String(result.name)
 	last_made_grade = grade
 	_add_potion(result, grade)

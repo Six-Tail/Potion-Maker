@@ -95,9 +95,10 @@ func grade_color(g: int) -> Color:
 func grade_mult(g: int) -> float:
 	return GRADE_MULT[clampi(g, 0, 2)]
 
-## 설정 시간(분)에 따른 등급 확률 [일반, 희귀, 고급]. 시간이 길수록 상위 등급↑.
-func grade_probabilities(minutes: float) -> Array:
-	var q := clampf(minutes / 180.0, 0.0, 1.0)   # 0분→0, 180분↑→1
+## 0~1 비율(레시피 시간범위 내 위치)에 따른 등급 확률 [일반, 희귀, 고급].
+## 비율이 클수록(= 허용 범위 안에서 더 오래 끓일수록) 상위 등급 확률이 오른다.
+func grade_probabilities_ratio(q: float) -> Array:
+	q = clampf(q, 0.0, 1.0)
 	var w_common := 1.0 - q                       # 짧을수록 일반
 	var w_rare := q * (1.0 - q) * 2.0 + 0.1       # 중간 구간에서 희귀 피크
 	var w_premium := q * q                        # 길수록 고급 급증
@@ -106,9 +107,20 @@ func grade_probabilities(minutes: float) -> Array:
 		return [1.0, 0.0, 0.0]
 	return [w_common / total, w_rare / total, w_premium / total]
 
-## 시간에 따라 등급을 확률적으로 뽑는다.
-func roll_grade(minutes: float) -> int:
-	var p := grade_probabilities(minutes)
+## 레시피 시간범위(rmin~rmax) 안에서 설정시간의 위치를 0~1 로 구한다.
+func time_ratio(minutes: float, rmin: float, rmax: float) -> float:
+	if rmax <= rmin:
+		return 1.0
+	return clampf((minutes - rmin) / (rmax - rmin), 0.0, 1.0)
+
+## 레시피 시간범위 기준 등급 확률 [일반, 희귀, 고급].
+## 같은 레시피라도 허용 시간 안에서 더 오래 끓이면 상위 등급이 잘 나온다.
+func grade_probabilities_for(minutes: float, rmin: float, rmax: float) -> Array:
+	return grade_probabilities_ratio(time_ratio(minutes, rmin, rmax))
+
+## 레시피 시간범위 기준으로 등급을 확률적으로 뽑는다.
+func roll_grade_for(minutes: float, rmin: float, rmax: float) -> int:
+	var p := grade_probabilities_for(minutes, rmin, rmax)
 	var r := randf()
 	if r < p[0]:
 		return 0

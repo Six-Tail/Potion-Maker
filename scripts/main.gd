@@ -405,7 +405,14 @@ func _update_grade_hint() -> void:
 		return
 	var t := time_input.text.strip_edges()
 	var m := clampi(int(t) if t.is_valid_int() else 0, 0, 600)
-	var p := Recipes.grade_probabilities(m)
+	# 현재 재료+시간으로 만들어질 물약을 판정해, 그 레시피의 시간범위 기준으로
+	# 등급 확률을 보여준다. (레시피 없음/시간범위 밖이면 항상 일반)
+	var res := Recipes.resolve(GameState.jar_ingredients, float(m))
+	var p: Array
+	if res.id != "unknown" and res.id != "failure":
+		p = Recipes.grade_probabilities_for(float(m), float(res.get("min", 1)), float(res.get("max", 1)))
+	else:
+		p = [1.0, 0.0, 0.0]
 	grade_hint.text = "예상 등급   [color=#b8b8b8]★일반 %d%%[/color]    [color=#5fd06a]★희귀 %d%%[/color]    [color=#4a9bff]★고급 %d%%[/color]" % [roundi(p[0] * 100), roundi(p[1] * 100), roundi(p[2] * 100)]
 
 func _read_minutes() -> int:
