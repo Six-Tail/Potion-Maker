@@ -34,6 +34,9 @@ var inventory: Dictionary = {}
 # 발견한 레시피 id 목록 (도감)
 var discovered: Array = []
 
+# 방금 완성한 물약 이름 (완성 알림용)
+var last_made_name: String = ""
+
 # 등록된 앱: [{ name:String(소문자 프로세스명), title:String }]
 var registered_apps: Array = []
 
@@ -126,6 +129,7 @@ func tick_brew(dt: float, active: bool) -> void:
 
 func _complete_brew() -> void:
 	var result: Dictionary = Recipes.resolve(brew.ings, brew.minutes)
+	last_made_name = String(result.name)
 	_add_potion(result)
 	brew = null
 	brew_changed.emit()

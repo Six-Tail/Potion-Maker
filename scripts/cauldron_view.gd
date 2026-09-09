@@ -1,6 +1,11 @@
 extends Control
 ## 항아리 + 연금술사 캐릭터를 코드로 그리는 위젯.
 ## main 이 아래 상태 변수를 갱신하면 애니메이션/그림이 바뀐다.
+## 가방에서 재료를 드래그해 이 위에 놓으면 항아리에 담긴다.
+
+signal ingredient_dropped(id)
+
+var drop_hover: bool = false   # 드래그한 재료가 위에 올라와 있는지
 
 var brewing: bool = false          # 제작 중인지
 var active: bool = false            # 현재 PC 사용 중(진행 중)인지
@@ -15,6 +20,17 @@ func _ready() -> void:
 	for i in range(10):
 		_bubbles.append(_new_bubble())
 
+func _can_drop_data(_at_position: Vector2, data) -> bool:
+	var ok: bool = typeof(data) == TYPE_DICTIONARY and data.get("type", "") == "ingredient"
+	if ok != drop_hover:
+		drop_hover = ok
+		queue_redraw()
+	return ok
+
+func _drop_data(_at_position: Vector2, data) -> void:
+	drop_hover = false
+	ingredient_dropped.emit(String(data.get("id", "")))
+
 func _new_bubble() -> Dictionary:
 	return {
 		"x": randf_range(0.35, 0.65),
@@ -25,6 +41,9 @@ func _new_bubble() -> Dictionary:
 
 func _process(delta: float) -> void:
 	_t += delta
+	# 드래그가 끝났는데 하이라이트가 남아있으면 해제
+	if drop_hover and not get_viewport().gui_is_dragging():
+		drop_hover = false
 	if result_flash > 0.0:
 		result_flash = maxf(result_flash - delta * 0.8, 0.0)
 	# 활발히 제작 중일 때만 거품이 빠르게 올라온다.
@@ -112,9 +131,12 @@ func _draw() -> void:
 	draw_line(Vector2(pot_cx - pot_top_r * 0.6, pot_top_y + rim_ry),
 		Vector2(pot_cx - pot_bot_r * 0.6, pot_bot_y - 10),
 		Color(1, 1, 1, 0.18), 6.0)
-	# 앞쪽 림
+	# 앞쪽 림 (드래그 재료가 위에 있으면 강조)
 	var rim := _ellipse(Vector2(pot_cx, pot_top_y), pot_top_r, rim_ry)
-	draw_polyline(_close(rim), Color("cfc7e0"), 4.0)
+	if drop_hover:
+		draw_polyline(_close(rim), Color("ffe680"), 6.0)
+	else:
+		draw_polyline(_close(rim), Color("cfc7e0"), 4.0)
 
 	# --- 연금술사 캐릭터 ---
 	_draw_character(Vector2(w * 0.14, pot_top_y + 6), liquid)

@@ -2,41 +2,44 @@ extends Control
 ## 메인 UI 컨트롤러. UI 를 코드로 구성하고 게임 흐름을 관리한다.
 
 const CauldronView := preload("res://scripts/cauldron_view.gd")
+const BagItem := preload("res://scripts/bag_item.gd")
 
 var cauldron: Control
 var status_label: Label
 var progress_bar: ProgressBar
-var jar_row: HBoxContainer
-var ing_grid: GridContainer
-var time_slider: HSlider
-var time_label: Label
+var jar_slots_row: HBoxContainer
+var clear_btn: Button
+var bag_grid: GridContainer
+var bag_buttons: Dictionary = {}   # 재료 id -> BagItem 버튼
+var time_input: LineEdit
 var brew_btn: Button
 var cancel_btn: Button
 var detect_label: Label
-var toast_label: Label
 var coins_label: Label
-var ing_buttons: Dictionary = {}   # 재료 id -> Button
+var toast_label: Label
 
-# 오버레이(보관함/도감/설정)
+# 오버레이(상점/보관함/도감/설정)
 var overlay: PanelContainer
 var overlay_title: Label
 var overlay_content: VBoxContainer
-var current_panel := ""   # "", "inventory", "recipes", "settings"
+var current_panel := ""
 
 # 설정 패널 라이브 갱신용 참조
 var live_external_label: Label
 var live_detect_label: Label
 
+# 창 본문 드래그 이동
+var _dragging := false
+var _drag_offset := Vector2i.ZERO
+
 var _was_brewing := false
 var _save_accum := 0.0
 
 func _ready() -> void:
-	# 창 설정
 	var win := get_window()
 	win.title = "🧪 물약 공방"
 	win.always_on_top = true
 
-	# 테마(한글 폰트)
 	var th := Theme.new()
 	var font := _load_korean_font()
 	if font:
@@ -47,7 +50,6 @@ func _ready() -> void:
 	_build_ui()
 	_connect_signals()
 
-	# 제작 진행 타이머 (0.5초 간격)
 	var t := Timer.new()
 	t.wait_time = 0.5
 	t.autostart = true
@@ -62,13 +64,18 @@ func _load_korean_font() -> FontFile:
 		"C:/Windows/Fonts/malgun.ttf",
 		"C:/Windows/Fonts/malgunbd.ttf",
 		"C:/Windows/Fonts/gulim.ttc",
-		"C:/Windows/Fonts/batang.ttc",
 		"C:/Windows/Fonts/NanumGothic.ttf",
 	]
 	for p in candidates:
 		if FileAccess.file_exists(p):
 			var f := FontFile.new()
 			if f.load_dynamic_font(p) == OK:
+				# 이모지 폴백 (아이콘이 깨지지 않도록)
+				var emoji := "C:/Windows/Fonts/seguiemj.ttf"
+				if FileAccess.file_exists(emoji):
+					var ef := FontFile.new()
+					if ef.load_dynamic_font(emoji) == OK:
+						f.fallbacks = [ef]
 				return f
 	return null
 
@@ -90,14 +97,17 @@ func _build_ui() -> void:
 	margin.add_theme_constant_override("margin_right", 14)
 	margin.add_theme_constant_override("margin_top", 10)
 	margin.add_theme_constant_override("margin_bottom", 12)
+	margin.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(margin)
 
 	var vb := VBoxContainer.new()
-	vb.add_theme_constant_override("separation", 8)
+	vb.add_theme_constant_override("separation", 9)
+	vb.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	margin.add_child(vb)
 
 	# --- 헤더 ---
 	var header := HBoxContainer.new()
+	header.add_theme_constant_override("separation", 4)
 	vb.add_child(header)
 	var title := Label.new()
 	title.text = "🧪 물약 공방"
@@ -111,131 +121,140 @@ func _build_ui() -> void:
 	coins_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	header.add_child(coins_label)
 	header.add_child(_mk_icon_button("🛒", func(): _open_panel("shop")))
-	header.add_child(_mk_icon_button("📦", func(): _open_panel("inventory")))
+	header.add_child(_mk_icon_button("🎒", func(): _open_panel("inventory")))
 	header.add_child(_mk_icon_button("📖", func(): _open_panel("recipes")))
 	header.add_child(_mk_icon_button("⚙", func(): _open_panel("settings")))
 
-	# --- 항아리 뷰 ---
+	# --- 항아리 (재료 드롭 대상) ---
 	cauldron = CauldronView.new()
-	cauldron.custom_minimum_size = Vector2(0, 230)
+	cauldron.custom_minimum_size = Vector2(0, 210)
 	cauldron.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	cauldron.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	cauldron.mouse_filter = Control.MOUSE_FILTER_STOP
+	cauldron.ingredient_dropped.connect(_on_add_ingredient)
 	vb.add_child(cauldron)
 
-	# --- 상태 라벨 ---
-	status_label = Label.new()
-	status_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	status_label.text = ""
-	vb.add_child(status_label)
-
-	# --- 진행 바 ---
+	# --- 진행 바 + 상태 ---
 	progress_bar = ProgressBar.new()
 	progress_bar.min_value = 0.0
 	progress_bar.max_value = 1.0
 	progress_bar.show_percentage = false
-	progress_bar.custom_minimum_size = Vector2(0, 14)
+	progress_bar.custom_minimum_size = Vector2(0, 10)
+	progress_bar.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	vb.add_child(progress_bar)
 
-	# --- 항아리 재료 칩 ---
+	status_label = Label.new()
+	status_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	status_label.add_theme_font_size_override("font_size", 13)
+	status_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	vb.add_child(status_label)
+
+	# --- 항아리 슬롯 ---
 	var jar_head := HBoxContainer.new()
+	jar_head.add_theme_constant_override("separation", 6)
+	jar_head.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	vb.add_child(jar_head)
-	var jl := Label.new()
-	jl.text = "항아리:"
-	jl.add_theme_color_override("font_color", Color("b9aee0"))
-	jar_head.add_child(jl)
-	jar_row = HBoxContainer.new()
-	jar_row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	jar_head.add_child(jar_row)
-	var clear_btn := Button.new()
+	jar_slots_row = HBoxContainer.new()
+	jar_slots_row.add_theme_constant_override("separation", 6)
+	jar_slots_row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	jar_head.add_child(jar_slots_row)
+	clear_btn = Button.new()
 	clear_btn.text = "비우기"
+	clear_btn.focus_mode = Control.FOCUS_NONE
 	clear_btn.pressed.connect(func(): GameState.clear_jar())
 	jar_head.add_child(clear_btn)
 
-	# --- 재료 트레이 ---
-	var tray_lbl := Label.new()
-	tray_lbl.text = "재료 담기 (최대 %d개)" % GameState.MAX_INGREDIENTS
-	tray_lbl.add_theme_color_override("font_color", Color("b9aee0"))
-	vb.add_child(tray_lbl)
+	# --- 가방 ---
+	var bag_label := Label.new()
+	bag_label.text = "🎒 가방 — 재료를 항아리로 끌어넣거나 클릭"
+	bag_label.add_theme_font_size_override("font_size", 12)
+	bag_label.add_theme_color_override("font_color", Color("9a90bc"))
+	bag_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	vb.add_child(bag_label)
 
-	ing_grid = GridContainer.new()
-	ing_grid.columns = 4
-	ing_grid.add_theme_constant_override("h_separation", 6)
-	ing_grid.add_theme_constant_override("v_separation", 6)
-	vb.add_child(ing_grid)
+	bag_grid = GridContainer.new()
+	bag_grid.columns = 4
+	bag_grid.add_theme_constant_override("h_separation", 6)
+	bag_grid.add_theme_constant_override("v_separation", 6)
+	vb.add_child(bag_grid)
 	for id in Recipes.INGREDIENTS.keys():
 		var info = Recipes.INGREDIENTS[id]
-		var b := Button.new()
-		b.text = "● " + info.name
-		b.add_theme_color_override("font_color", info.color)
+		var b := BagItem.new()
+		b.ing_id = id
 		b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		b.clip_text = true
+		b.focus_mode = Control.FOCUS_NONE
+		b.add_theme_color_override("font_color", info.color)
 		var cap_id: String = id
 		b.pressed.connect(func(): _on_add_ingredient(cap_id))
-		ing_grid.add_child(b)
-		ing_buttons[id] = b
+		bag_grid.add_child(b)
+		bag_buttons[id] = b
 
-	# --- 시간 설정 ---
-	var time_head := HBoxContainer.new()
-	vb.add_child(time_head)
+	# --- 제작 시간(텍스트 입력) ---
+	var time_row := HBoxContainer.new()
+	time_row.add_theme_constant_override("separation", 6)
+	vb.add_child(time_row)
 	var tlab := Label.new()
 	tlab.text = "제작 시간"
 	tlab.add_theme_color_override("font_color", Color("b9aee0"))
-	time_head.add_child(tlab)
-	time_slider = HSlider.new()
-	time_slider.min_value = 1
-	time_slider.max_value = 120
-	time_slider.step = 1
-	time_slider.value = 10
-	time_slider.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	time_slider.value_changed.connect(func(_v): _update_time_label())
-	time_head.add_child(time_slider)
-	time_label = Label.new()
-	time_label.custom_minimum_size = Vector2(52, 0)
-	time_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
-	time_head.add_child(time_label)
+	tlab.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	time_row.add_child(tlab)
+	time_input = LineEdit.new()
+	time_input.text = "10"
+	time_input.alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	time_input.custom_minimum_size = Vector2(70, 0)
+	time_input.max_length = 3
+	time_input.text_changed.connect(_on_time_text_changed)
+	time_row.add_child(time_input)
+	var minlab := Label.new()
+	minlab.text = "분 (1~600)"
+	minlab.add_theme_color_override("font_color", Color("b9aee0"))
+	minlab.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	minlab.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	time_row.add_child(minlab)
 
 	# --- 제작 / 취소 버튼 ---
 	brew_btn = Button.new()
 	brew_btn.text = "제작 시작"
-	brew_btn.custom_minimum_size = Vector2(0, 40)
+	brew_btn.custom_minimum_size = Vector2(0, 42)
+	brew_btn.focus_mode = Control.FOCUS_NONE
 	brew_btn.add_theme_font_size_override("font_size", 18)
 	brew_btn.pressed.connect(_on_brew_pressed)
 	vb.add_child(brew_btn)
 
 	cancel_btn = Button.new()
 	cancel_btn.text = "제작 취소 (재료 회수)"
+	cancel_btn.focus_mode = Control.FOCUS_NONE
 	cancel_btn.pressed.connect(func(): GameState.cancel_brew())
 	cancel_btn.visible = false
 	vb.add_child(cancel_btn)
 
-	# --- 감지 상태 라벨 ---
+	# --- 감지 상태(작게) ---
 	detect_label = Label.new()
-	detect_label.add_theme_font_size_override("font_size", 12)
-	detect_label.add_theme_color_override("font_color", Color("7f75a0"))
+	detect_label.add_theme_font_size_override("font_size", 11)
+	detect_label.add_theme_color_override("font_color", Color("6f6690"))
 	detect_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	detect_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	detect_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	vb.add_child(detect_label)
 
-	# --- 오버레이 ---
 	_build_overlay()
 
 	# --- 토스트 ---
 	toast_label = Label.new()
 	toast_label.set_anchors_preset(Control.PRESET_CENTER_TOP)
-	toast_label.position = Vector2(0, 60)
+	toast_label.position = Vector2(0, 54)
 	toast_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	toast_label.add_theme_font_size_override("font_size", 20)
+	toast_label.add_theme_font_size_override("font_size", 19)
 	toast_label.modulate = Color(1, 1, 1, 0)
 	toast_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(toast_label)
-
-	_update_time_label()
 
 func _mk_icon_button(txt: String, cb: Callable) -> Button:
 	var b := Button.new()
 	b.text = txt
 	b.custom_minimum_size = Vector2(38, 34)
-	b.add_theme_font_size_override("font_size", 18)
+	b.focus_mode = Control.FOCUS_NONE
+	b.add_theme_font_size_override("font_size", 17)
 	b.pressed.connect(cb)
 	return b
 
@@ -274,12 +293,89 @@ func _build_overlay() -> void:
 	scroll.add_child(overlay_content)
 
 func _connect_signals() -> void:
-	GameState.jar_changed.connect(refresh_jar)
+	GameState.jar_changed.connect(_on_jar_changed)
 	GameState.brew_changed.connect(_on_brew_changed)
 	GameState.inventory_changed.connect(func(): if current_panel == "inventory": _fill_inventory())
 	GameState.apps_changed.connect(func(): if current_panel == "settings": _fill_settings())
 	GameState.coins_changed.connect(_on_coins_changed)
 	GameState.stock_changed.connect(_on_stock_changed)
+
+# ============================================================
+# 창 본문 드래그 이동
+# ============================================================
+func _input(event: InputEvent) -> void:
+	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT:
+		if event.pressed:
+			if _is_drag_area(get_viewport().gui_get_hovered_control()):
+				_dragging = true
+				_drag_offset = get_window().position - DisplayServer.mouse_get_position()
+		else:
+			_dragging = false
+	elif event is InputEventMouseMotion and _dragging:
+		get_window().position = DisplayServer.mouse_get_position() + _drag_offset
+
+func _process(_delta: float) -> void:
+	# 마우스 릴리즈를 놓친 경우 대비
+	if _dragging and not Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT):
+		_dragging = false
+
+func _is_drag_area(c: Control) -> bool:
+	if c == null:
+		return true
+	if c is Button or c is Slider or c is LineEdit or c is ScrollBar:
+		return false
+	return true
+
+# ============================================================
+# 이벤트
+# ============================================================
+func _on_add_ingredient(id: String) -> void:
+	if id == "":
+		return
+	if not GameState.add_ingredient(id):
+		if GameState.brew != null:
+			_show_toast("제작 중에는 재료를 넣을 수 없어요")
+		elif GameState.jar_ingredients.size() >= GameState.MAX_INGREDIENTS:
+			_show_toast("항아리가 가득 찼어요")
+		else:
+			_show_toast("%s 재고가 없어요 (상점에서 구매)" % Recipes.ingredient_name(id))
+
+func _on_time_text_changed(s: String) -> void:
+	var clean := ""
+	for ch in s:
+		if ch >= "0" and ch <= "9":
+			clean += ch
+	if clean != s:
+		time_input.text = clean
+		time_input.caret_column = clean.length()
+
+func _read_minutes() -> int:
+	var t := time_input.text.strip_edges()
+	var m := int(t) if t.is_valid_int() else 10
+	m = clampi(m, 1, 600)
+	time_input.text = str(m)
+	return m
+
+func _on_brew_pressed() -> void:
+	if GameState.brew != null:
+		return
+	if GameState.jar_ingredients.is_empty():
+		_show_toast("재료를 먼저 넣어주세요")
+		return
+	GameState.start_brew(_read_minutes())
+	_show_toast("제작 시작! 등록한 앱을 사용하면 진행돼요")
+
+func _on_brew_changed() -> void:
+	var brewing := GameState.brew != null
+	if _was_brewing and not brewing:
+		cauldron.result_flash = 1.0
+		var last := GameState.last_made_name
+		if last != "":
+			_show_toast("✨ %s 완성!" % last)
+			if not get_window().has_focus():
+				Watcher.notify("물약 공방 — 완성!", "%s 이(가) 완성되었어요." % last)
+	_was_brewing = brewing
+	refresh_all()
 
 func _on_coins_changed() -> void:
 	_refresh_coins()
@@ -293,50 +389,10 @@ func _on_stock_changed() -> void:
 	if current_panel == "shop":
 		_fill_shop()
 
-func _refresh_coins() -> void:
-	if coins_label:
-		coins_label.text = "🪙 %d" % GameState.coins
-
-# ============================================================
-# 이벤트
-# ============================================================
-func _on_add_ingredient(id: String) -> void:
-	if not GameState.add_ingredient(id):
-		if GameState.brew != null:
-			_show_toast("제작 중에는 재료를 넣을 수 없어요")
-		elif GameState.jar_ingredients.size() >= GameState.MAX_INGREDIENTS:
-			_show_toast("항아리가 가득 찼어요")
-		else:
-			_show_toast("%s 재고가 없어요 (상점에서 구매)" % Recipes.ingredient_name(id))
-
-func _on_brew_pressed() -> void:
-	if GameState.brew != null:
-		return
-	if GameState.jar_ingredients.is_empty():
-		_show_toast("재료를 먼저 넣어주세요")
-		return
-	GameState.start_brew(time_slider.value)
-	_show_toast("제작 시작! PC를 사용하면 진행돼요")
-
-func _on_brew_changed() -> void:
-	var brewing := GameState.brew != null
-	if _was_brewing and not brewing:
-		# 방금 완성됨 — 마지막으로 만든 물약 안내
-		cauldron.result_flash = 1.0
-		var last := _latest_potion_name()
-		if last != "":
-			_show_toast("✨ %s 완성!" % last)
-	_was_brewing = brewing
-	refresh_all()
-
-func _latest_potion_name() -> String:
-	# inventory 중 방금 추가된 것을 정확히 알긴 어렵지만, 안내용으로 최근 항목 표시
-	var names := []
-	for id in GameState.inventory.keys():
-		names.append(GameState.inventory[id].name)
-	if names.is_empty():
-		return ""
-	return names[names.size() - 1]
+func _on_jar_changed() -> void:
+	refresh_jar_slots()
+	refresh_controls()
+	refresh_status()
 
 func _on_tick() -> void:
 	var active := Watcher.is_pc_active()
@@ -347,12 +403,9 @@ func _on_tick() -> void:
 	cauldron.progress = GameState.brew_progress()
 
 	refresh_status()
-
-	# 설정 패널이 열려 있으면 라이브 정보 갱신
 	if current_panel == "settings":
 		_update_settings_live()
 
-	# 주기적 저장 (10초)
 	_save_accum += 0.5
 	if _save_accum >= 10.0:
 		_save_accum = 0.0
@@ -363,52 +416,57 @@ func _on_tick() -> void:
 # 새로고침
 # ============================================================
 func refresh_all() -> void:
-	refresh_jar()
+	refresh_jar_slots()
 	refresh_controls()
 	refresh_status()
 
-func refresh_jar() -> void:
-	for c in jar_row.get_children():
+func refresh_jar_slots() -> void:
+	for c in jar_slots_row.get_children():
 		c.queue_free()
+	var brewing := GameState.brew != null
+	var ings: Array = GameState.brew.ings if brewing else GameState.jar_ingredients
 	var colors := []
-	if GameState.brew != null:
-		for id in GameState.brew.ings:
+	for i in range(GameState.MAX_INGREDIENTS):
+		var slot := Button.new()
+		slot.custom_minimum_size = Vector2(0, 30)
+		slot.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		slot.focus_mode = Control.FOCUS_NONE
+		slot.clip_text = true
+		if i < ings.size():
+			var id: String = ings[i]
 			colors.append(Recipes.ingredient_color(id))
-			var lbl := Label.new()
-			lbl.text = "● " + Recipes.ingredient_name(id)
-			lbl.add_theme_color_override("font_color", Recipes.ingredient_color(id))
-			jar_row.add_child(lbl)
-	else:
-		if GameState.jar_ingredients.is_empty():
-			var e := Label.new()
-			e.text = "(비어 있음)"
-			e.add_theme_color_override("font_color", Color("6a6088"))
-			jar_row.add_child(e)
-		for i in range(GameState.jar_ingredients.size()):
-			var id: String = GameState.jar_ingredients[i]
-			colors.append(Recipes.ingredient_color(id))
-			var idx := i
-			var b := Button.new()
-			b.text = Recipes.ingredient_name(id) + " ✕"
-			b.add_theme_color_override("font_color", Recipes.ingredient_color(id))
-			b.pressed.connect(func(): GameState.remove_ingredient_at(idx))
-			jar_row.add_child(b)
+			slot.text = "● " + Recipes.ingredient_name(id)
+			slot.add_theme_color_override("font_color", Recipes.ingredient_color(id))
+			if brewing:
+				slot.disabled = true
+			else:
+				var idx := i
+				slot.tooltip_text = "클릭하면 가방으로 되돌립니다"
+				slot.pressed.connect(func(): GameState.remove_ingredient_at(idx))
+		else:
+			slot.text = "＋"
+			slot.disabled = true
+		jar_slots_row.add_child(slot)
 	cauldron.liquid_colors = colors
-	refresh_controls()
 
 func refresh_controls() -> void:
 	var brewing := GameState.brew != null
 	brew_btn.visible = not brewing
 	cancel_btn.visible = brewing
 	brew_btn.disabled = GameState.jar_ingredients.is_empty()
-	time_slider.editable = not brewing
+	time_input.editable = not brewing
+	clear_btn.visible = (not brewing) and not GameState.jar_ingredients.is_empty()
 	var jar_full := GameState.jar_ingredients.size() >= GameState.MAX_INGREDIENTS
-	for id in ing_buttons.keys():
-		var b: Button = ing_buttons[id]
+	for id in bag_buttons.keys():
+		var b: Button = bag_buttons[id]
 		var stock := GameState.available_stock(id)
 		b.text = "● %s (%d)" % [Recipes.ingredient_name(id), stock]
 		b.disabled = brewing or jar_full or stock <= 0
 	_refresh_coins()
+
+func _refresh_coins() -> void:
+	if coins_label:
+		coins_label.text = "🪙 %d" % GameState.coins
 
 func refresh_status() -> void:
 	if GameState.brew != null:
@@ -424,13 +482,10 @@ func refresh_status() -> void:
 	else:
 		progress_bar.value = 0.0
 		if GameState.jar_ingredients.is_empty():
-			status_label.text = "재료를 넣고 시간을 정한 뒤 제작을 시작하세요"
+			status_label.text = "재료를 항아리에 넣고 제작을 시작하세요"
 		else:
 			status_label.text = "준비 완료 — 제작을 시작하세요"
 	detect_label.text = Watcher.status_text()
-
-func _update_time_label() -> void:
-	time_label.text = "%d분" % int(time_slider.value)
 
 func _fmt_time(sec: float) -> String:
 	var s := int(round(sec))
@@ -454,7 +509,7 @@ func _open_panel(which: String) -> void:
 			overlay_title.text = "🛒 상점"
 			_fill_shop()
 		"inventory":
-			overlay_title.text = "📦 보관함"
+			overlay_title.text = "🎒 보관함"
 			_fill_inventory()
 		"recipes":
 			overlay_title.text = "📖 레시피 도감"
@@ -471,13 +526,16 @@ func _clear_overlay() -> void:
 	for c in overlay_content.get_children():
 		c.queue_free()
 
-func _fill_inventory() -> void:
-	_clear_overlay()
+func _coin_header() -> void:
 	var cl := Label.new()
 	cl.text = "보유 코인: 🪙 %d" % GameState.coins
 	cl.add_theme_color_override("font_color", Color("ffd447"))
 	overlay_content.add_child(cl)
 	overlay_content.add_child(_hsep())
+
+func _fill_inventory() -> void:
+	_clear_overlay()
+	_coin_header()
 	if GameState.inventory.is_empty():
 		var e := Label.new()
 		e.text = "아직 만든 물약이 없어요."
@@ -507,6 +565,7 @@ func _fill_inventory() -> void:
 		var cap_id: String = id
 		var sell := Button.new()
 		sell.text = "판매 🪙%d" % Recipes.sell_value(id)
+		sell.focus_mode = Control.FOCUS_NONE
 		sell.pressed.connect(func(): _on_sell(cap_id))
 		row.add_child(sell)
 		overlay_content.add_child(row)
@@ -524,11 +583,7 @@ func _fill_shop() -> void:
 	intro.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	intro.add_theme_color_override("font_color", Color("9a90bc"))
 	overlay_content.add_child(intro)
-	var cl := Label.new()
-	cl.text = "보유 코인: 🪙 %d" % GameState.coins
-	cl.add_theme_color_override("font_color", Color("ffd447"))
-	overlay_content.add_child(cl)
-	overlay_content.add_child(_hsep())
+	_coin_header()
 	for id in Recipes.INGREDIENTS.keys():
 		var info = Recipes.INGREDIENTS[id]
 		var price := Recipes.buy_price(id)
@@ -545,6 +600,7 @@ func _fill_shop() -> void:
 		var cap_id: String = id
 		var buy := Button.new()
 		buy.text = "구매 🪙%d" % price
+		buy.focus_mode = Control.FOCUS_NONE
 		buy.disabled = GameState.coins < price
 		buy.pressed.connect(func(): _on_buy(cap_id))
 		row.add_child(buy)
@@ -586,7 +642,7 @@ func _fill_recipes() -> void:
 		box.add_child(info)
 		if found:
 			var d := Label.new()
-			d.text = r.desc
+			d.text = r.desc + "   (판매가 🪙%d)" % int(r.value)
 			d.add_theme_font_size_override("font_size", 12)
 			d.add_theme_color_override("font_color", Color("9a90bc"))
 			d.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
@@ -616,6 +672,7 @@ func _fill_settings() -> void:
 
 	var add_btn := Button.new()
 	add_btn.text = "➕ 현재(마지막) 외부 창 등록"
+	add_btn.focus_mode = Control.FOCUS_NONE
 	add_btn.pressed.connect(_on_add_current_window)
 	overlay_content.add_child(add_btn)
 
@@ -644,6 +701,7 @@ func _fill_settings() -> void:
 			var idx := i
 			var del := Button.new()
 			del.text = "삭제"
+			del.focus_mode = Control.FOCUS_NONE
 			del.pressed.connect(func(): GameState.remove_app_at(idx))
 			row.add_child(del)
 			overlay_content.add_child(row)
@@ -658,6 +716,7 @@ func _fill_settings() -> void:
 
 	var force_cb := CheckBox.new()
 	force_cb.text = "강제 진행 (PC 사용 여부 무시)"
+	force_cb.focus_mode = Control.FOCUS_NONE
 	force_cb.button_pressed = GameState.force_active
 	force_cb.toggled.connect(func(on):
 		GameState.force_active = on
@@ -671,6 +730,7 @@ func _fill_settings() -> void:
 	for mult in [1.0, 10.0, 60.0]:
 		var b := Button.new()
 		b.toggle_mode = true
+		b.focus_mode = Control.FOCUS_NONE
 		b.text = "%d배" % int(mult)
 		b.button_pressed = is_equal_approx(GameState.time_scale, mult)
 		var m: float = mult
@@ -689,8 +749,16 @@ func _fill_settings() -> void:
 	win_lbl.add_theme_font_size_override("font_size", 16)
 	overlay_content.add_child(win_lbl)
 
+	var hint := Label.new()
+	hint.text = "창의 빈 공간을 잡고 드래그하면 위치를 옮길 수 있어요."
+	hint.add_theme_font_size_override("font_size", 12)
+	hint.add_theme_color_override("font_color", Color("9a90bc"))
+	hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	overlay_content.add_child(hint)
+
 	var top_cb := CheckBox.new()
 	top_cb.text = "항상 위에 표시"
+	top_cb.focus_mode = Control.FOCUS_NONE
 	top_cb.button_pressed = get_window().always_on_top
 	top_cb.toggled.connect(func(on): get_window().always_on_top = on)
 	overlay_content.add_child(top_cb)
@@ -704,6 +772,7 @@ func _fill_settings() -> void:
 	for entry in [["↖", 0], ["↗", 1], ["↙", 2], ["↘", 3]]:
 		var b := Button.new()
 		b.text = entry[0]
+		b.focus_mode = Control.FOCUS_NONE
 		b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		var corner: int = entry[1]
 		b.pressed.connect(func(): _snap_window(corner))
@@ -711,20 +780,6 @@ func _fill_settings() -> void:
 	overlay_content.add_child(snap_row)
 
 	_update_settings_live()
-
-## 창을 화면 구석으로 이동. corner: 0=좌상 1=우상 2=좌하 3=우하
-func _snap_window(corner: int) -> void:
-	var win := get_window()
-	var scr := DisplayServer.screen_get_usable_rect(win.current_screen)
-	var ws := win.size
-	var margin := 12
-	var x := scr.position.x + margin
-	var y := scr.position.y + margin
-	if corner == 1 or corner == 3:
-		x = scr.position.x + scr.size.x - ws.x - margin
-	if corner == 2 or corner == 3:
-		y = scr.position.y + scr.size.y - ws.y - margin
-	win.position = Vector2i(x, y)
 
 func _update_settings_live() -> void:
 	if live_detect_label:
@@ -748,6 +803,20 @@ func _on_add_current_window() -> void:
 		_show_toast("등록됨: %s" % nm)
 	else:
 		_show_toast("이미 등록된 프로그램이에요")
+
+## 창을 화면 구석으로 이동. corner: 0=좌상 1=우상 2=좌하 3=우하
+func _snap_window(corner: int) -> void:
+	var win := get_window()
+	var scr := DisplayServer.screen_get_usable_rect(win.current_screen)
+	var ws := win.size
+	var margin := 12
+	var x := scr.position.x + margin
+	var y := scr.position.y + margin
+	if corner == 1 or corner == 3:
+		x = scr.position.x + scr.size.x - ws.x - margin
+	if corner == 2 or corner == 3:
+		y = scr.position.y + scr.size.y - ws.y - margin
+	win.position = Vector2i(x, y)
 
 # ============================================================
 # 유틸

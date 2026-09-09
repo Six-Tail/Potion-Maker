@@ -141,16 +141,30 @@ func stop_helper() -> void:
 		f.close()
 
 func _write_helper_scripts() -> void:
-	var ps1 := _ps1_source()
-	var vbs := _vbs_source()
-	var f1 := FileAccess.open("user://watcher.ps1", FileAccess.WRITE)
-	if f1:
-		f1.store_string(ps1)
-		f1.close()
-	var f2 := FileAccess.open("user://watcher.vbs", FileAccess.WRITE)
-	if f2:
-		f2.store_string(vbs)
-		f2.close()
+	_write_text("user://watcher.ps1", _ps1_source())
+	_write_text("user://watcher.vbs", _vbs_source())
+	_write_text("user://notify.ps1", _notify_ps1_source())
+	_write_text("user://notify.vbs", _notify_vbs_source())
+
+func _write_text(path: String, content: String) -> void:
+	var f := FileAccess.open(path, FileAccess.WRITE)
+	if f:
+		f.store_string(content)
+		f.close()
+
+## Windows 알림(토스트) 표시. 제목/내용을 파일로 넘겨 인코딩 문제를 피한다.
+func notify(title: String, message: String) -> void:
+	if OS.get_name() != "Windows":
+		return
+	var f := FileAccess.open("user://notify.txt", FileAccess.WRITE)
+	if f == null:
+		return
+	f.store_string(title + "\n" + message)
+	f.close()
+	var wscript := "C:/Windows/System32/wscript.exe"
+	var vbs := _data_dir + "/notify.vbs"
+	var ps1 := _data_dir + "/notify.ps1"
+	OS.create_process(wscript, [vbs, ps1, _data_dir])
 
 func _ps1_source() -> String:
 	# 주의: 이 문자열 안에는 역슬래시를 넣지 않는다(GDScript 이스케이프 회피).
@@ -198,5 +212,34 @@ ps1 = WScript.Arguments(0)
 dataDir = WScript.Arguments(1)
 gpid = WScript.Arguments(2)
 cmd = "powershell -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File " & q & ps1 & q & " -DataDir " & q & dataDir & q & " -GodotPid " & gpid
+sh.Run cmd, 0, False
+"""
+
+func _notify_ps1_source() -> String:
+	return """param([string]$DataDir)
+$f = Join-Path $DataDir "notify.txt"
+if (-not (Test-Path $f)) { return }
+$lines = @(Get-Content -Path $f -Encoding UTF8)
+$title = "Potion Workshop"
+$msg = ""
+if ($lines.Count -ge 1) { $title = $lines[0] }
+if ($lines.Count -ge 2) { $msg = $lines[1] }
+Add-Type -AssemblyName System.Windows.Forms
+Add-Type -AssemblyName System.Drawing
+$n = New-Object System.Windows.Forms.NotifyIcon
+$n.Icon = [System.Drawing.SystemIcons]::Information
+$n.Visible = $true
+$n.ShowBalloonTip(6000, $title, $msg, [System.Windows.Forms.ToolTipIcon]::Info)
+Start-Sleep -Seconds 7
+$n.Visible = $false
+$n.Dispose()
+"""
+
+func _notify_vbs_source() -> String:
+	return """Set sh = CreateObject("WScript.Shell")
+q = Chr(34)
+ps1 = WScript.Arguments(0)
+dataDir = WScript.Arguments(1)
+cmd = "powershell -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File " & q & ps1 & q & " -DataDir " & q & dataDir & q
 sh.Run cmd, 0, False
 """
