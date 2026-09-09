@@ -137,6 +137,14 @@ func start_brew(minutes: float) -> bool:
 	save_game()
 	return true
 
+## [디버그] 진행 중인 제작을 즉시 완료한다. 성공 시 true.
+func debug_complete_brew() -> bool:
+	if brew == null:
+		return false
+	brew.acc_sec = brew.target_sec
+	_complete_brew()
+	return true
+
 func cancel_brew() -> void:
 	if brew == null:
 		return

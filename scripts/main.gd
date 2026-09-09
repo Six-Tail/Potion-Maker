@@ -815,6 +815,12 @@ func _fill_settings() -> void:
 		speed_row.add_child(b)
 	overlay_content.add_child(speed_row)
 
+	var instant_btn := Button.new()
+	instant_btn.text = "⚡ 즉시 제작 완료 (디버그)"
+	instant_btn.focus_mode = Control.FOCUS_NONE
+	instant_btn.pressed.connect(_on_debug_complete)
+	overlay_content.add_child(instant_btn)
+
 	overlay_content.add_child(_hsep())
 
 	# --- 화면 테마 ---
@@ -895,6 +901,11 @@ func _update_settings_live() -> void:
 			var reg = " ✔ 이미 등록됨" if GameState.is_app_registered(nm) else ""
 			live_external_label.text = "현재 감지된 외부 창: %s%s" % [Watcher._display(nm, Watcher.last_external_title), reg]
 			live_external_label.add_theme_color_override("font_color", GameState.col("gold"))
+
+## [디버그] 진행 중인 제작을 즉시 완료. 완성 알림은 brew_changed 로 자동 표시된다.
+func _on_debug_complete() -> void:
+	if not GameState.debug_complete_brew():
+		_show_toast("진행 중인 제작이 없어요")
 
 func _on_add_current_window() -> void:
 	var nm := Watcher.last_external_name
