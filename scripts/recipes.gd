@@ -80,6 +80,42 @@ var FAILURE := {
 	"desc": "재료 없이 끓여봐야 그냥 물이다.",
 }
 
+# ---------- 등급(레어리티) ----------
+# 0=일반(회색) 1=희귀(초록) 2=고급(파랑)
+var GRADE_NAMES := ["일반", "희귀", "고급"]
+var GRADE_COLORS := [Color("b8b8b8"), Color("5fd06a"), Color("4a9bff")]
+var GRADE_MULT := [1.0, 1.8, 3.2]   # 등급별 판매가 배수
+
+func grade_name(g: int) -> String:
+	return GRADE_NAMES[clampi(g, 0, 2)]
+
+func grade_color(g: int) -> Color:
+	return GRADE_COLORS[clampi(g, 0, 2)]
+
+func grade_mult(g: int) -> float:
+	return GRADE_MULT[clampi(g, 0, 2)]
+
+## 설정 시간(분)에 따른 등급 확률 [일반, 희귀, 고급]. 시간이 길수록 상위 등급↑.
+func grade_probabilities(minutes: float) -> Array:
+	var q := clampf(minutes / 180.0, 0.0, 1.0)   # 0분→0, 180분↑→1
+	var w_common := 1.0 - q                       # 짧을수록 일반
+	var w_rare := q * (1.0 - q) * 2.0 + 0.1       # 중간 구간에서 희귀 피크
+	var w_premium := q * q                        # 길수록 고급 급증
+	var total := w_common + w_rare + w_premium
+	if total <= 0.0:
+		return [1.0, 0.0, 0.0]
+	return [w_common / total, w_rare / total, w_premium / total]
+
+## 시간에 따라 등급을 확률적으로 뽑는다.
+func roll_grade(minutes: float) -> int:
+	var p := grade_probabilities(minutes)
+	var r := randf()
+	if r < p[0]:
+		return 0
+	elif r < p[0] + p[1]:
+		return 1
+	return 2
+
 func _sorted_key(ing: Array) -> String:
 	var a = ing.duplicate()
 	a.sort()

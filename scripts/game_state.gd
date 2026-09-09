@@ -34,8 +34,9 @@ var inventory: Dictionary = {}
 # 발견한 레시피 id 목록 (도감)
 var discovered: Array = []
 
-# 방금 완성한 물약 이름 (완성 알림용)
+# 방금 완성한 물약 (완성 알림용)
 var last_made_name: String = ""
+var last_made_grade: int = 0
 
 # 등록된 앱: [{ name:String(소문자 프로세스명), title:String }]
 var registered_apps: Array = []
@@ -45,6 +46,7 @@ var time_scale: float = 1.0        # 제작 속도 배율(테스트용)
 var force_active: bool = false      # true 면 PC 사용 여부와 무관하게 항상 진행
 
 func _ready() -> void:
+	randomize()
 	load_game()
 
 func _exit_tree() -> void:
@@ -129,8 +131,13 @@ func tick_brew(dt: float, active: bool) -> void:
 
 func _complete_brew() -> void:
 	var result: Dictionary = Recipes.resolve(brew.ings, brew.minutes)
+	# 등급 판정: 실패작/정체불명은 항상 일반, 그 외는 시간에 따라 확률적으로.
+	var grade := 0
+	if result.id != "unknown" and result.id != "failure":
+		grade = Recipes.roll_grade(brew.minutes)
 	last_made_name = String(result.name)
-	_add_potion(result)
+	last_made_grade = grade
+	_add_potion(result, grade)
 	brew = null
 	brew_changed.emit()
 	save_game()
@@ -146,27 +153,32 @@ func brew_remaining_sec() -> float:
 	return maxf(brew.target_sec - brew.acc_sec, 0.0)
 
 # ---------- 보관함 / 도감 ----------
-func _add_potion(p: Dictionary) -> void:
+func _add_potion(p: Dictionary, grade: int = 0) -> void:
 	var id: String = p.id
-	if inventory.has(id):
-		inventory[id].count += 1
+	var key := "%s@%d" % [id, grade]   # 등급별로 따로 보관
+	if inventory.has(key):
+		inventory[key].count += 1
 	else:
-		inventory[id] = {
+		var base := int(p.get("value", 5))
+		var val := int(round(base * Recipes.grade_mult(grade)))
+		inventory[key] = {
+			"id": id,
 			"name": p.name,
 			"color": _color_to_arr(p.color),
 			"desc": p.get("desc", ""),
-			"value": int(p.get("value", 5)),
+			"grade": grade,
+			"value": val,
 			"count": 1,
 		}
 	if id != "unknown" and id != "failure" and not discovered.has(id):
 		discovered.append(id)
 	inventory_changed.emit()
 
-func take_potion(id: String) -> void:
-	if inventory.has(id):
-		inventory[id].count -= 1
-		if inventory[id].count <= 0:
-			inventory.erase(id)
+func take_potion(key: String) -> void:
+	if inventory.has(key):
+		inventory[key].count -= 1
+		if inventory[key].count <= 0:
+			inventory.erase(key)
 		inventory_changed.emit()
 		save_game()
 
@@ -182,14 +194,15 @@ func buy_ingredient(id: String) -> bool:
 	save_game()
 	return true
 
-## 물약 1개 판매. 판매가(코인)를 반환, 실패 시 0.
-func sell_potion(id: String) -> int:
-	if not inventory.has(id):
+## 물약 1개 판매(등급 포함 key). 판매가(코인)를 반환, 실패 시 0.
+func sell_potion(key: String) -> int:
+	if not inventory.has(key):
 		return 0
-	var value := int(Recipes.sell_value(id))
-	inventory[id].count -= 1
-	if inventory[id].count <= 0:
-		inventory.erase(id)
+	var entry = inventory[key]
+	var value := int(entry.get("value", Recipes.sell_value(String(entry.get("id", key)))))
+	entry.count -= 1
+	if entry.count <= 0:
+		inventory.erase(key)
 	coins += value
 	inventory_changed.emit()
 	coins_changed.emit()

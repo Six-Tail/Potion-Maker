@@ -12,6 +12,7 @@ var clear_btn: Button
 var bag_grid: GridContainer
 var bag_buttons: Dictionary = {}   # 재료 id -> BagItem 버튼
 var time_input: LineEdit
+var grade_hint: RichTextLabel
 var brew_btn: Button
 var cancel_btn: Button
 var detect_label: Label
@@ -212,6 +213,15 @@ func _build_ui() -> void:
 	minlab.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	time_row.add_child(minlab)
 
+	# --- 예상 등급 확률 (시간이 길수록 상위 등급↑) ---
+	grade_hint = RichTextLabel.new()
+	grade_hint.bbcode_enabled = true
+	grade_hint.fit_content = true
+	grade_hint.scroll_active = false
+	grade_hint.add_theme_font_size_override("normal_font_size", 12)
+	grade_hint.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	vb.add_child(grade_hint)
+
 	# --- 제작 / 취소 버튼 ---
 	brew_btn = Button.new()
 	brew_btn.text = "제작 시작"
@@ -348,6 +358,15 @@ func _on_time_text_changed(s: String) -> void:
 	if clean != s:
 		time_input.text = clean
 		time_input.caret_column = clean.length()
+	_update_grade_hint()
+
+func _update_grade_hint() -> void:
+	if grade_hint == null:
+		return
+	var t := time_input.text.strip_edges()
+	var m := clampi(int(t) if t.is_valid_int() else 0, 0, 600)
+	var p := Recipes.grade_probabilities(m)
+	grade_hint.text = "예상 등급   [color=#b8b8b8]★일반 %d%%[/color]    [color=#5fd06a]★희귀 %d%%[/color]    [color=#4a9bff]★고급 %d%%[/color]" % [roundi(p[0] * 100), roundi(p[1] * 100), roundi(p[2] * 100)]
 
 func _read_minutes() -> int:
 	var t := time_input.text.strip_edges()
@@ -371,9 +390,11 @@ func _on_brew_changed() -> void:
 		cauldron.result_flash = 1.0
 		var last := GameState.last_made_name
 		if last != "":
-			_show_toast("✨ %s 완성!" % last)
+			var g := GameState.last_made_grade
+			var gname := Recipes.grade_name(g)
+			_show_toast("✨ ★%s %s 완성!" % [gname, last], Recipes.grade_color(g))
 			if not get_window().has_focus():
-				Watcher.notify("물약 공방 — 완성!", "%s 이(가) 완성되었어요." % last)
+				Watcher.notify("물약 공방 — 완성!", "[%s] %s 이(가) 완성되었어요." % [gname, last])
 	_was_brewing = brewing
 	refresh_all()
 
@@ -463,6 +484,7 @@ func refresh_controls() -> void:
 		b.text = "● %s (%d)" % [Recipes.ingredient_name(id), stock]
 		b.disabled = brewing or jar_full or stock <= 0
 	_refresh_coins()
+	_update_grade_hint()
 
 func _refresh_coins() -> void:
 	if coins_label:
@@ -541,8 +563,10 @@ func _fill_inventory() -> void:
 		e.text = "아직 만든 물약이 없어요."
 		overlay_content.add_child(e)
 		return
-	for id in GameState.inventory.keys():
-		var p = GameState.inventory[id]
+	for key in GameState.inventory.keys():
+		var p = GameState.inventory[key]
+		var grade := int(p.get("grade", 0))
+		var value := int(p.get("value", Recipes.sell_value(String(p.get("id", key)))))
 		var row := HBoxContainer.new()
 		row.add_theme_constant_override("separation", 8)
 		var sw := ColorRect.new()
@@ -552,8 +576,10 @@ func _fill_inventory() -> void:
 		var box := VBoxContainer.new()
 		box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		var n := Label.new()
-		n.text = "%s  ×%d" % [p.name, p.count]
 		n.add_theme_font_size_override("font_size", 16)
+		# 등급 ★ + 물약명 + 개수 (★ 색상으로 등급 구분)
+		n.text = "★ %s  %s  ×%d" % [Recipes.grade_name(grade), p.name, p.count]
+		n.add_theme_color_override("font_color", Recipes.grade_color(grade))
 		box.add_child(n)
 		var d := Label.new()
 		d.text = p.get("desc", "")
@@ -562,17 +588,17 @@ func _fill_inventory() -> void:
 		d.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 		box.add_child(d)
 		row.add_child(box)
-		var cap_id: String = id
+		var cap_key: String = key
 		var sell := Button.new()
-		sell.text = "판매 🪙%d" % Recipes.sell_value(id)
+		sell.text = "판매 🪙%d" % value
 		sell.focus_mode = Control.FOCUS_NONE
-		sell.pressed.connect(func(): _on_sell(cap_id))
+		sell.pressed.connect(func(): _on_sell(cap_key))
 		row.add_child(sell)
 		overlay_content.add_child(row)
 		overlay_content.add_child(_hsep())
 
-func _on_sell(id: String) -> void:
-	var v := GameState.sell_potion(id)
+func _on_sell(key: String) -> void:
+	var v := GameState.sell_potion(key)
 	if v > 0:
 		_show_toast("판매 +🪙%d" % v)
 
@@ -615,7 +641,7 @@ func _on_buy(id: String) -> void:
 func _fill_recipes() -> void:
 	_clear_overlay()
 	var intro := Label.new()
-	intro.text = "재료 조합과 시간대에 따라 다른 물약이 만들어집니다. 발견하면 이름이 공개돼요."
+	intro.text = "재료 조합과 시간대에 따라 다른 물약이 만들어집니다. 발견하면 이름이 공개돼요.\n제작 시간이 길수록 높은 등급(★일반<희귀<고급)이 나올 확률이 오르고, 등급이 높을수록 비싸게 팔립니다."
 	intro.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	intro.add_theme_color_override("font_color", Color("9a90bc"))
 	overlay_content.add_child(intro)
@@ -642,7 +668,7 @@ func _fill_recipes() -> void:
 		box.add_child(info)
 		if found:
 			var d := Label.new()
-			d.text = r.desc + "   (판매가 🪙%d)" % int(r.value)
+			d.text = r.desc + "   (일반 판매가 🪙%d)" % int(r.value)
 			d.add_theme_font_size_override("font_size", 12)
 			d.add_theme_color_override("font_color", Color("9a90bc"))
 			d.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
@@ -824,7 +850,8 @@ func _snap_window(corner: int) -> void:
 func _hsep() -> HSeparator:
 	return HSeparator.new()
 
-func _show_toast(text: String) -> void:
+func _show_toast(text: String, col: Color = Color.WHITE) -> void:
+	toast_label.add_theme_color_override("font_color", col)
 	toast_label.text = text
 	toast_label.modulate = Color(1, 1, 1, 1)
 	var tw := create_tween()
