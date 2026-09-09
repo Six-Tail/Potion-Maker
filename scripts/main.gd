@@ -14,6 +14,8 @@ var brew_btn: Button
 var cancel_btn: Button
 var detect_label: Label
 var toast_label: Label
+var coins_label: Label
+var ing_buttons: Dictionary = {}   # 재료 id -> Button
 
 # 오버레이(보관함/도감/설정)
 var overlay: PanelContainer
@@ -99,9 +101,16 @@ func _build_ui() -> void:
 	vb.add_child(header)
 	var title := Label.new()
 	title.text = "🧪 물약 공방"
-	title.add_theme_font_size_override("font_size", 20)
+	title.add_theme_font_size_override("font_size", 18)
 	title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	title.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	header.add_child(title)
+	coins_label = Label.new()
+	coins_label.add_theme_font_size_override("font_size", 16)
+	coins_label.add_theme_color_override("font_color", Color("ffd447"))
+	coins_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	header.add_child(coins_label)
+	header.add_child(_mk_icon_button("🛒", func(): _open_panel("shop")))
 	header.add_child(_mk_icon_button("📦", func(): _open_panel("inventory")))
 	header.add_child(_mk_icon_button("📖", func(): _open_panel("recipes")))
 	header.add_child(_mk_icon_button("⚙", func(): _open_panel("settings")))
@@ -159,9 +168,11 @@ func _build_ui() -> void:
 		b.text = "● " + info.name
 		b.add_theme_color_override("font_color", info.color)
 		b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		b.clip_text = true
 		var cap_id: String = id
 		b.pressed.connect(func(): _on_add_ingredient(cap_id))
 		ing_grid.add_child(b)
+		ing_buttons[id] = b
 
 	# --- 시간 설정 ---
 	var time_head := HBoxContainer.new()
@@ -267,6 +278,24 @@ func _connect_signals() -> void:
 	GameState.brew_changed.connect(_on_brew_changed)
 	GameState.inventory_changed.connect(func(): if current_panel == "inventory": _fill_inventory())
 	GameState.apps_changed.connect(func(): if current_panel == "settings": _fill_settings())
+	GameState.coins_changed.connect(_on_coins_changed)
+	GameState.stock_changed.connect(_on_stock_changed)
+
+func _on_coins_changed() -> void:
+	_refresh_coins()
+	if current_panel == "shop":
+		_fill_shop()
+	elif current_panel == "inventory":
+		_fill_inventory()
+
+func _on_stock_changed() -> void:
+	refresh_controls()
+	if current_panel == "shop":
+		_fill_shop()
+
+func _refresh_coins() -> void:
+	if coins_label:
+		coins_label.text = "🪙 %d" % GameState.coins
 
 # ============================================================
 # 이벤트
@@ -275,8 +304,10 @@ func _on_add_ingredient(id: String) -> void:
 	if not GameState.add_ingredient(id):
 		if GameState.brew != null:
 			_show_toast("제작 중에는 재료를 넣을 수 없어요")
-		else:
+		elif GameState.jar_ingredients.size() >= GameState.MAX_INGREDIENTS:
 			_show_toast("항아리가 가득 찼어요")
+		else:
+			_show_toast("%s 재고가 없어요 (상점에서 구매)" % Recipes.ingredient_name(id))
 
 func _on_brew_pressed() -> void:
 	if GameState.brew != null:
@@ -371,9 +402,13 @@ func refresh_controls() -> void:
 	cancel_btn.visible = brewing
 	brew_btn.disabled = GameState.jar_ingredients.is_empty()
 	time_slider.editable = not brewing
-	for b in ing_grid.get_children():
-		if b is Button:
-			b.disabled = brewing or GameState.jar_ingredients.size() >= GameState.MAX_INGREDIENTS
+	var jar_full := GameState.jar_ingredients.size() >= GameState.MAX_INGREDIENTS
+	for id in ing_buttons.keys():
+		var b: Button = ing_buttons[id]
+		var stock := GameState.available_stock(id)
+		b.text = "● %s (%d)" % [Recipes.ingredient_name(id), stock]
+		b.disabled = brewing or jar_full or stock <= 0
+	_refresh_coins()
 
 func refresh_status() -> void:
 	if GameState.brew != null:
@@ -415,6 +450,9 @@ func _open_panel(which: String) -> void:
 	current_panel = which
 	overlay.visible = true
 	match which:
+		"shop":
+			overlay_title.text = "🛒 상점"
+			_fill_shop()
 		"inventory":
 			overlay_title.text = "📦 보관함"
 			_fill_inventory()
@@ -435,6 +473,11 @@ func _clear_overlay() -> void:
 
 func _fill_inventory() -> void:
 	_clear_overlay()
+	var cl := Label.new()
+	cl.text = "보유 코인: 🪙 %d" % GameState.coins
+	cl.add_theme_color_override("font_color", Color("ffd447"))
+	overlay_content.add_child(cl)
+	overlay_content.add_child(_hsep())
 	if GameState.inventory.is_empty():
 		var e := Label.new()
 		e.text = "아직 만든 물약이 없어요."
@@ -461,8 +504,57 @@ func _fill_inventory() -> void:
 		d.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 		box.add_child(d)
 		row.add_child(box)
+		var cap_id: String = id
+		var sell := Button.new()
+		sell.text = "판매 🪙%d" % Recipes.sell_value(id)
+		sell.pressed.connect(func(): _on_sell(cap_id))
+		row.add_child(sell)
 		overlay_content.add_child(row)
 		overlay_content.add_child(_hsep())
+
+func _on_sell(id: String) -> void:
+	var v := GameState.sell_potion(id)
+	if v > 0:
+		_show_toast("판매 +🪙%d" % v)
+
+func _fill_shop() -> void:
+	_clear_overlay()
+	var intro := Label.new()
+	intro.text = "재료를 구매해 물약을 만들고, 완성한 물약은 보관함에서 팔아 코인을 모으세요."
+	intro.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	intro.add_theme_color_override("font_color", Color("9a90bc"))
+	overlay_content.add_child(intro)
+	var cl := Label.new()
+	cl.text = "보유 코인: 🪙 %d" % GameState.coins
+	cl.add_theme_color_override("font_color", Color("ffd447"))
+	overlay_content.add_child(cl)
+	overlay_content.add_child(_hsep())
+	for id in Recipes.INGREDIENTS.keys():
+		var info = Recipes.INGREDIENTS[id]
+		var price := Recipes.buy_price(id)
+		var row := HBoxContainer.new()
+		row.add_theme_constant_override("separation", 8)
+		var sw := ColorRect.new()
+		sw.color = info.color
+		sw.custom_minimum_size = Vector2(24, 24)
+		row.add_child(sw)
+		var nm := Label.new()
+		nm.text = "%s   (보유 %d)" % [info.name, GameState.available_stock(id)]
+		nm.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		row.add_child(nm)
+		var cap_id: String = id
+		var buy := Button.new()
+		buy.text = "구매 🪙%d" % price
+		buy.disabled = GameState.coins < price
+		buy.pressed.connect(func(): _on_buy(cap_id))
+		row.add_child(buy)
+		overlay_content.add_child(row)
+
+func _on_buy(id: String) -> void:
+	if GameState.buy_ingredient(id):
+		_show_toast("%s 구매!" % Recipes.ingredient_name(id))
+	else:
+		_show_toast("코인이 부족해요")
 
 func _fill_recipes() -> void:
 	_clear_overlay()
@@ -589,7 +681,50 @@ func _fill_settings() -> void:
 		speed_row.add_child(b)
 	overlay_content.add_child(speed_row)
 
+	overlay_content.add_child(_hsep())
+
+	# --- 위젯 창 ---
+	var win_lbl := Label.new()
+	win_lbl.text = "위젯 창"
+	win_lbl.add_theme_font_size_override("font_size", 16)
+	overlay_content.add_child(win_lbl)
+
+	var top_cb := CheckBox.new()
+	top_cb.text = "항상 위에 표시"
+	top_cb.button_pressed = get_window().always_on_top
+	top_cb.toggled.connect(func(on): get_window().always_on_top = on)
+	overlay_content.add_child(top_cb)
+
+	var snap_lbl := Label.new()
+	snap_lbl.text = "화면 구석으로 이동"
+	snap_lbl.add_theme_color_override("font_color", Color("b9aee0"))
+	overlay_content.add_child(snap_lbl)
+
+	var snap_row := HBoxContainer.new()
+	for entry in [["↖", 0], ["↗", 1], ["↙", 2], ["↘", 3]]:
+		var b := Button.new()
+		b.text = entry[0]
+		b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		var corner: int = entry[1]
+		b.pressed.connect(func(): _snap_window(corner))
+		snap_row.add_child(b)
+	overlay_content.add_child(snap_row)
+
 	_update_settings_live()
+
+## 창을 화면 구석으로 이동. corner: 0=좌상 1=우상 2=좌하 3=우하
+func _snap_window(corner: int) -> void:
+	var win := get_window()
+	var scr := DisplayServer.screen_get_usable_rect(win.current_screen)
+	var ws := win.size
+	var margin := 12
+	var x := scr.position.x + margin
+	var y := scr.position.y + margin
+	if corner == 1 or corner == 3:
+		x = scr.position.x + scr.size.x - ws.x - margin
+	if corner == 2 or corner == 3:
+		y = scr.position.y + scr.size.y - ws.y - margin
+	win.position = Vector2i(x, y)
 
 func _update_settings_live() -> void:
 	if live_detect_label:

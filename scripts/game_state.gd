@@ -6,9 +6,20 @@ signal jar_changed
 signal brew_changed
 signal inventory_changed
 signal apps_changed
+signal coins_changed
+signal stock_changed
 
 const SAVE_PATH := "user://save.json"
 const MAX_INGREDIENTS := 3
+
+# 보유 코인 (재화)
+var coins: int = 60
+
+# 재료 재고: 재료 id -> 보유 개수 (첫 실행 기본값)
+var ingredient_stock: Dictionary = {
+	"herb": 3, "dew": 3, "mushroom": 2, "crystal": 2,
+	"ember": 2, "slime": 1, "bone": 1, "petal": 1,
+}
 
 # 항아리에 담긴 재료 id 목록 (제작 시작 전)
 var jar_ingredients: Array = []
@@ -37,13 +48,20 @@ func _exit_tree() -> void:
 	save_game()
 
 # ---------- 항아리 ----------
+func available_stock(id: String) -> int:
+	return int(ingredient_stock.get(id, 0))
+
 func add_ingredient(id: String) -> bool:
 	if brew != null:
 		return false
 	if jar_ingredients.size() >= MAX_INGREDIENTS:
 		return false
+	if available_stock(id) <= 0:
+		return false
+	ingredient_stock[id] = available_stock(id) - 1
 	jar_ingredients.append(id)
 	jar_changed.emit()
+	stock_changed.emit()
 	save_game()
 	return true
 
@@ -51,15 +69,21 @@ func remove_ingredient_at(idx: int) -> void:
 	if brew != null:
 		return
 	if idx >= 0 and idx < jar_ingredients.size():
+		var id: String = jar_ingredients[idx]
 		jar_ingredients.remove_at(idx)
+		ingredient_stock[id] = available_stock(id) + 1
 		jar_changed.emit()
+		stock_changed.emit()
 		save_game()
 
 func clear_jar() -> void:
 	if brew != null:
 		return
+	for id in jar_ingredients:
+		ingredient_stock[id] = available_stock(id) + 1
 	jar_ingredients.clear()
 	jar_changed.emit()
+	stock_changed.emit()
 	save_game()
 
 # ---------- 제작 ----------
@@ -127,6 +151,7 @@ func _add_potion(p: Dictionary) -> void:
 			"name": p.name,
 			"color": _color_to_arr(p.color),
 			"desc": p.get("desc", ""),
+			"value": int(p.get("value", 5)),
 			"count": 1,
 		}
 	if id != "unknown" and id != "failure" and not discovered.has(id):
@@ -140,6 +165,32 @@ func take_potion(id: String) -> void:
 			inventory.erase(id)
 		inventory_changed.emit()
 		save_game()
+
+# ---------- 상점 / 판매 ----------
+func buy_ingredient(id: String) -> bool:
+	var price := int(Recipes.INGREDIENTS.get(id, {}).get("price", 5))
+	if coins < price:
+		return false
+	coins -= price
+	ingredient_stock[id] = available_stock(id) + 1
+	coins_changed.emit()
+	stock_changed.emit()
+	save_game()
+	return true
+
+## 물약 1개 판매. 판매가(코인)를 반환, 실패 시 0.
+func sell_potion(id: String) -> int:
+	if not inventory.has(id):
+		return 0
+	var value := int(Recipes.sell_value(id))
+	inventory[id].count -= 1
+	if inventory[id].count <= 0:
+		inventory.erase(id)
+	coins += value
+	inventory_changed.emit()
+	coins_changed.emit()
+	save_game()
+	return value
 
 # ---------- 등록된 앱 ----------
 func is_app_registered(pname: String) -> bool:
@@ -184,6 +235,8 @@ func save_game() -> void:
 		"apps": registered_apps,
 		"time_scale": time_scale,
 		"force_active": force_active,
+		"coins": coins,
+		"stock": ingredient_stock,
 	}
 	var f := FileAccess.open(SAVE_PATH, FileAccess.WRITE)
 	if f:
@@ -208,6 +261,13 @@ func load_game() -> void:
 	registered_apps = data.get("apps", [])
 	time_scale = float(data.get("time_scale", 1.0))
 	force_active = bool(data.get("force_active", false))
+	coins = int(data.get("coins", coins))
+	var saved_stock = data.get("stock", null)
+	if typeof(saved_stock) == TYPE_DICTIONARY:
+		var s := {}
+		for k in saved_stock.keys():
+			s[k] = int(saved_stock[k])
+		ingredient_stock = s
 	# brew 내부 숫자값들이 JSON 파싱으로 float 이 되도록 보정
 	if brew != null:
 		brew.minutes = float(brew.get("minutes", 1.0))
