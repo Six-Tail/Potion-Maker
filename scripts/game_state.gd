@@ -8,6 +8,7 @@ signal inventory_changed
 signal apps_changed
 signal coins_changed
 signal stock_changed
+signal theme_changed
 
 const SAVE_PATH := "user://save.json"
 const MAX_INGREDIENTS := 3
@@ -44,6 +45,33 @@ var registered_apps: Array = []
 # 설정
 var time_scale: float = 1.0        # 제작 속도 배율(테스트용)
 var force_active: bool = false      # true 면 PC 사용 여부와 무관하게 항상 진행
+var theme_mode: String = "dark"    # 화면 테마: "dark" | "light"
+
+## 현재 테마에 맞는 UI 색상을 역할(role) 이름으로 반환한다.
+## 재료/물약/등급 등 콘텐츠 색은 여기서 다루지 않고 각자 색을 유지한다.
+func col(role: String) -> Color:
+	var light := theme_mode == "light"
+	match role:
+		"bg":         return Color("f4f0fa") if light else Color("1d1830")  # 창 배경
+		"panel":      return Color("ffffff") if light else Color("221c38")  # 오버레이 패널
+		"text":       return Color("2a2340") if light else Color("ece8f7")  # 기본 글자
+		"text_muted": return Color("585074") if light else Color("b9aee0")  # 보조 글자
+		"text_dim":   return Color("6f6690") if light else Color("9a90bc")  # 흐린 글자
+		"text_faint": return Color("857b9e") if light else Color("8a80a6")  # 더 흐린 글자
+		"text_ghost": return Color("9a92b0") if light else Color("6f6690")  # 가장 흐린 글자
+		"gold":       return Color("b8860b") if light else Color("ffd447")  # 코인/강조
+		"success":    return Color("2e8b57") if light else Color("7fd0a0")  # 성공/감지
+	return Color("2a2340") if light else Color("ece8f7")
+
+## 테마를 변경하고 저장 후 알린다.
+func set_theme_mode(mode: String) -> void:
+	if mode != "dark" and mode != "light":
+		return
+	if theme_mode == mode:
+		return
+	theme_mode = mode
+	save_game()
+	theme_changed.emit()
 
 func _ready() -> void:
 	randomize()
@@ -252,6 +280,7 @@ func save_game() -> void:
 		"apps": registered_apps,
 		"time_scale": time_scale,
 		"force_active": force_active,
+		"theme": theme_mode,
 		"coins": coins,
 		"stock": ingredient_stock,
 	}
@@ -278,6 +307,9 @@ func load_game() -> void:
 	registered_apps = data.get("apps", [])
 	time_scale = float(data.get("time_scale", 1.0))
 	force_active = bool(data.get("force_active", false))
+	theme_mode = String(data.get("theme", "dark"))
+	if theme_mode != "dark" and theme_mode != "light":
+		theme_mode = "dark"
 	coins = int(data.get("coins", coins))
 	var saved_stock = data.get("stock", null)
 	if typeof(saved_stock) == TYPE_DICTIONARY:

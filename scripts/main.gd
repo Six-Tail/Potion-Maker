@@ -19,6 +19,9 @@ var detect_label: Label
 var coins_label: Label
 var toast_label: Label
 
+# 전체 UI 루트(테마 변경 시 통째로 다시 만든다)
+var _root: Control
+
 # 오버레이(상점/보관함/도감/설정)
 var overlay: PanelContainer
 var overlay_title: Label
@@ -46,6 +49,7 @@ func _ready() -> void:
 	if font:
 		th.default_font = font
 	th.default_font_size = 15
+	_apply_theme_colors(th)
 	theme = th
 
 	_build_ui()
@@ -81,16 +85,51 @@ func _load_korean_font() -> FontFile:
 	return null
 
 # ============================================================
+# 테마
+# ============================================================
+## 현재 테마에 맞는 기본 글자색을 Theme 리소스에 반영한다.
+## (색 지정이 없는 라벨/버튼/체크박스/입력창이 라이트·다크 모드에 맞게 보이도록)
+func _apply_theme_colors(th: Theme) -> void:
+	var t := GameState.col("text")
+	for cls in ["Label", "Button", "CheckBox", "LineEdit"]:
+		th.set_color("font_color", cls, t)
+	th.set_color("font_hover_color", "Button", t)
+	th.set_color("font_pressed_color", "Button", t)
+	th.set_color("font_focus_color", "Button", t)
+	th.set_color("font_hover_color", "CheckBox", t)
+	th.set_color("font_pressed_color", "CheckBox", t)
+	th.set_color("default_color", "RichTextLabel", t)
+
+## 테마 변경 시 UI 를 통째로 다시 만들어 모든 색을 새 팔레트로 갱신한다.
+func _rebuild_ui() -> void:
+	var panel := current_panel
+	current_panel = ""
+	overlay = null
+	if is_instance_valid(_root):
+		_root.queue_free()
+	bag_buttons.clear()
+	_apply_theme_colors(theme)
+	_build_ui()
+	refresh_all()
+	if panel != "":
+		_open_panel(panel)
+
+# ============================================================
 # UI 구성
 # ============================================================
 func _build_ui() -> void:
 	set_anchors_preset(Control.PRESET_FULL_RECT)
 
+	_root = Control.new()
+	_root.set_anchors_preset(Control.PRESET_FULL_RECT)
+	_root.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	add_child(_root)
+
 	var bg := ColorRect.new()
-	bg.color = Color("1d1830")
+	bg.color = GameState.col("bg")
 	bg.set_anchors_preset(Control.PRESET_FULL_RECT)
 	bg.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	add_child(bg)
+	_root.add_child(bg)
 
 	var margin := MarginContainer.new()
 	margin.set_anchors_preset(Control.PRESET_FULL_RECT)
@@ -99,7 +138,7 @@ func _build_ui() -> void:
 	margin.add_theme_constant_override("margin_top", 10)
 	margin.add_theme_constant_override("margin_bottom", 12)
 	margin.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	add_child(margin)
+	_root.add_child(margin)
 
 	var vb := VBoxContainer.new()
 	vb.add_theme_constant_override("separation", 9)
@@ -118,7 +157,7 @@ func _build_ui() -> void:
 	header.add_child(title)
 	coins_label = Label.new()
 	coins_label.add_theme_font_size_override("font_size", 16)
-	coins_label.add_theme_color_override("font_color", Color("ffd447"))
+	coins_label.add_theme_color_override("font_color", GameState.col("gold"))
 	coins_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	header.add_child(coins_label)
 	header.add_child(_mk_icon_button("🛒", func(): _open_panel("shop")))
@@ -168,7 +207,7 @@ func _build_ui() -> void:
 	var bag_label := Label.new()
 	bag_label.text = "🎒 가방 — 재료를 항아리로 끌어넣거나 클릭"
 	bag_label.add_theme_font_size_override("font_size", 12)
-	bag_label.add_theme_color_override("font_color", Color("9a90bc"))
+	bag_label.add_theme_color_override("font_color", GameState.col("text_dim"))
 	bag_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	vb.add_child(bag_label)
 
@@ -196,7 +235,7 @@ func _build_ui() -> void:
 	vb.add_child(time_row)
 	var tlab := Label.new()
 	tlab.text = "제작 시간"
-	tlab.add_theme_color_override("font_color", Color("b9aee0"))
+	tlab.add_theme_color_override("font_color", GameState.col("text_muted"))
 	tlab.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	time_row.add_child(tlab)
 	time_input = LineEdit.new()
@@ -208,7 +247,7 @@ func _build_ui() -> void:
 	time_row.add_child(time_input)
 	var minlab := Label.new()
 	minlab.text = "분 (1~600)"
-	minlab.add_theme_color_override("font_color", Color("b9aee0"))
+	minlab.add_theme_color_override("font_color", GameState.col("text_muted"))
 	minlab.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	minlab.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	time_row.add_child(minlab)
@@ -241,7 +280,7 @@ func _build_ui() -> void:
 	# --- 감지 상태(작게) ---
 	detect_label = Label.new()
 	detect_label.add_theme_font_size_override("font_size", 11)
-	detect_label.add_theme_color_override("font_color", Color("6f6690"))
+	detect_label.add_theme_color_override("font_color", GameState.col("text_ghost"))
 	detect_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	detect_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	detect_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -257,7 +296,7 @@ func _build_ui() -> void:
 	toast_label.add_theme_font_size_override("font_size", 19)
 	toast_label.modulate = Color(1, 1, 1, 0)
 	toast_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	add_child(toast_label)
+	_root.add_child(toast_label)
 
 func _mk_icon_button(txt: String, cb: Callable) -> Button:
 	var b := Button.new()
@@ -273,13 +312,13 @@ func _build_overlay() -> void:
 	overlay.set_anchors_preset(Control.PRESET_FULL_RECT)
 	overlay.visible = false
 	var sb := StyleBoxFlat.new()
-	sb.bg_color = Color("221c38")
+	sb.bg_color = GameState.col("panel")
 	sb.content_margin_left = 14
 	sb.content_margin_right = 14
 	sb.content_margin_top = 12
 	sb.content_margin_bottom = 12
 	overlay.add_theme_stylebox_override("panel", sb)
-	add_child(overlay)
+	_root.add_child(overlay)
 
 	var ov := VBoxContainer.new()
 	ov.add_theme_constant_override("separation", 8)
@@ -309,6 +348,7 @@ func _connect_signals() -> void:
 	GameState.apps_changed.connect(func(): if current_panel == "settings": _fill_settings())
 	GameState.coins_changed.connect(_on_coins_changed)
 	GameState.stock_changed.connect(_on_stock_changed)
+	GameState.theme_changed.connect(_rebuild_ui)
 
 # ============================================================
 # 창 본문 드래그 이동
@@ -551,7 +591,7 @@ func _clear_overlay() -> void:
 func _coin_header() -> void:
 	var cl := Label.new()
 	cl.text = "보유 코인: 🪙 %d" % GameState.coins
-	cl.add_theme_color_override("font_color", Color("ffd447"))
+	cl.add_theme_color_override("font_color", GameState.col("gold"))
 	overlay_content.add_child(cl)
 	overlay_content.add_child(_hsep())
 
@@ -584,7 +624,7 @@ func _fill_inventory() -> void:
 		var d := Label.new()
 		d.text = p.get("desc", "")
 		d.add_theme_font_size_override("font_size", 12)
-		d.add_theme_color_override("font_color", Color("9a90bc"))
+		d.add_theme_color_override("font_color", GameState.col("text_dim"))
 		d.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 		box.add_child(d)
 		row.add_child(box)
@@ -607,7 +647,7 @@ func _fill_shop() -> void:
 	var intro := Label.new()
 	intro.text = "재료를 구매해 물약을 만들고, 완성한 물약은 보관함에서 팔아 코인을 모으세요."
 	intro.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	intro.add_theme_color_override("font_color", Color("9a90bc"))
+	intro.add_theme_color_override("font_color", GameState.col("text_dim"))
 	overlay_content.add_child(intro)
 	_coin_header()
 	for id in Recipes.INGREDIENTS.keys():
@@ -643,7 +683,7 @@ func _fill_recipes() -> void:
 	var intro := Label.new()
 	intro.text = "재료 조합과 시간대에 따라 다른 물약이 만들어집니다. 발견하면 이름이 공개돼요.\n제작 시간이 길수록 높은 등급(★일반<희귀<고급)이 나올 확률이 오르고, 등급이 높을수록 비싸게 팔립니다."
 	intro.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	intro.add_theme_color_override("font_color", Color("9a90bc"))
+	intro.add_theme_color_override("font_color", GameState.col("text_dim"))
 	overlay_content.add_child(intro)
 	overlay_content.add_child(_hsep())
 	for r in Recipes.RECIPES:
@@ -656,7 +696,7 @@ func _fill_recipes() -> void:
 			title.add_theme_color_override("font_color", r.color)
 		else:
 			title.text = "❓ 미발견 물약"
-			title.add_theme_color_override("font_color", Color("8a80a6"))
+			title.add_theme_color_override("font_color", GameState.col("text_faint"))
 		box.add_child(title)
 		var ings := []
 		for iid in r.ing:
@@ -664,13 +704,13 @@ func _fill_recipes() -> void:
 		var info := Label.new()
 		info.text = "재료: %s   ·   시간: %d~%d분" % [", ".join(ings), r.min, r.max]
 		info.add_theme_font_size_override("font_size", 12)
-		info.add_theme_color_override("font_color", Color("b9aee0"))
+		info.add_theme_color_override("font_color", GameState.col("text_muted"))
 		box.add_child(info)
 		if found:
 			var d := Label.new()
 			d.text = r.desc + "   (일반 판매가 🪙%d)" % int(r.value)
 			d.add_theme_font_size_override("font_size", 12)
-			d.add_theme_color_override("font_color", Color("9a90bc"))
+			d.add_theme_color_override("font_color", GameState.col("text_dim"))
 			d.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 			box.add_child(d)
 		overlay_content.add_child(box)
@@ -682,12 +722,12 @@ func _fill_settings() -> void:
 	var guide := Label.new()
 	guide.text = "PC 사용 감지: 아래에 등록한 프로그램이 화면 맨 앞(활성 창)일 때 '사용 중'으로 판단해 제작이 진행됩니다.\n\n등록 방법: 원하는 프로그램(예: 크롬)을 클릭해 활성화한 뒤, 이 창으로 돌아와 '현재 창 등록'을 누르세요."
 	guide.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	guide.add_theme_color_override("font_color", Color("b9aee0"))
+	guide.add_theme_color_override("font_color", GameState.col("text_muted"))
 	overlay_content.add_child(guide)
 
 	live_detect_label = Label.new()
 	live_detect_label.add_theme_font_size_override("font_size", 12)
-	live_detect_label.add_theme_color_override("font_color", Color("7fd0a0"))
+	live_detect_label.add_theme_color_override("font_color", GameState.col("success"))
 	live_detect_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	overlay_content.add_child(live_detect_label)
 
@@ -712,7 +752,7 @@ func _fill_settings() -> void:
 	if GameState.registered_apps.is_empty():
 		var e := Label.new()
 		e.text = "(없음) — 위에서 프로그램을 등록하세요."
-		e.add_theme_color_override("font_color", Color("8a80a6"))
+		e.add_theme_color_override("font_color", GameState.col("text_faint"))
 		overlay_content.add_child(e)
 	else:
 		for i in range(GameState.registered_apps.size()):
@@ -722,6 +762,7 @@ func _fill_settings() -> void:
 			var t: String = a.get("title", "")
 			nm.text = a.name + ("  (%s)" % t if t.strip_edges() != "" else "")
 			nm.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+			nm.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 			nm.add_theme_font_size_override("font_size", 13)
 			row.add_child(nm)
 			var idx := i
@@ -769,6 +810,34 @@ func _fill_settings() -> void:
 
 	overlay_content.add_child(_hsep())
 
+	# --- 화면 테마 ---
+	var theme_lbl := Label.new()
+	theme_lbl.text = "화면 테마"
+	theme_lbl.add_theme_font_size_override("font_size", 16)
+	overlay_content.add_child(theme_lbl)
+
+	var theme_hint := Label.new()
+	theme_hint.text = "밝은/어두운 화면을 선택하세요. (현재 선택한 테마 버튼은 비활성화됩니다)"
+	theme_hint.add_theme_font_size_override("font_size", 12)
+	theme_hint.add_theme_color_override("font_color", GameState.col("text_dim"))
+	theme_hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	overlay_content.add_child(theme_hint)
+
+	var theme_row := HBoxContainer.new()
+	theme_row.add_theme_constant_override("separation", 6)
+	for entry in [["🌙 다크", "dark"], ["☀ 라이트", "light"]]:
+		var b := Button.new()
+		b.text = entry[0]
+		b.focus_mode = Control.FOCUS_NONE
+		b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		var mode: String = entry[1]
+		b.disabled = GameState.theme_mode == mode
+		b.pressed.connect(func(): GameState.set_theme_mode(mode))
+		theme_row.add_child(b)
+	overlay_content.add_child(theme_row)
+
+	overlay_content.add_child(_hsep())
+
 	# --- 위젯 창 ---
 	var win_lbl := Label.new()
 	win_lbl.text = "위젯 창"
@@ -778,7 +847,7 @@ func _fill_settings() -> void:
 	var hint := Label.new()
 	hint.text = "창의 빈 공간을 잡고 드래그하면 위치를 옮길 수 있어요."
 	hint.add_theme_font_size_override("font_size", 12)
-	hint.add_theme_color_override("font_color", Color("9a90bc"))
+	hint.add_theme_color_override("font_color", GameState.col("text_dim"))
 	hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	overlay_content.add_child(hint)
 
@@ -791,7 +860,7 @@ func _fill_settings() -> void:
 
 	var snap_lbl := Label.new()
 	snap_lbl.text = "화면 구석으로 이동"
-	snap_lbl.add_theme_color_override("font_color", Color("b9aee0"))
+	snap_lbl.add_theme_color_override("font_color", GameState.col("text_muted"))
 	overlay_content.add_child(snap_lbl)
 
 	var snap_row := HBoxContainer.new()
@@ -814,11 +883,11 @@ func _update_settings_live() -> void:
 		var nm := Watcher.last_external_name
 		if nm == "":
 			live_external_label.text = "현재 감지된 외부 창: (없음 — 다른 프로그램을 클릭해 보세요)"
-			live_external_label.add_theme_color_override("font_color", Color("8a80a6"))
+			live_external_label.add_theme_color_override("font_color", GameState.col("text_faint"))
 		else:
 			var reg = " ✔ 이미 등록됨" if GameState.is_app_registered(nm) else ""
 			live_external_label.text = "현재 감지된 외부 창: %s%s" % [Watcher._display(nm, Watcher.last_external_title), reg]
-			live_external_label.add_theme_color_override("font_color", Color("ffd447"))
+			live_external_label.add_theme_color_override("font_color", GameState.col("gold"))
 
 func _on_add_current_window() -> void:
 	var nm := Watcher.last_external_name
