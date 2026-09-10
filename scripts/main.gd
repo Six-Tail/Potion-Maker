@@ -6,6 +6,7 @@ const BagItem := preload("res://scripts/bag_item.gd")
 
 var cauldron: Control
 var status_label: Label
+var remain_label: Label
 var progress_bar: ProgressBar
 var jar_slots_row: HBoxContainer
 var clear_btn: Button
@@ -92,6 +93,34 @@ func _load_korean_font() -> FontFile:
 # ============================================================
 ## 현재 테마에 맞는 기본 글자색을 Theme 리소스에 반영한다.
 ## (색 지정이 없는 라벨/버튼/체크박스/입력창이 라이트·다크 모드에 맞게 보이도록)
+## 둥근 StyleBoxFlat (여백 없음) — 카드/바/트랙 등에 사용
+func _sb_plain(color: Color, radius: int = 10) -> StyleBoxFlat:
+	var sb := StyleBoxFlat.new()
+	sb.bg_color = color
+	sb.set_corner_radius_all(radius)
+	return sb
+
+## 둥근 StyleBoxFlat (버튼용 내부 여백 포함)
+func _sb_pad(color: Color, radius: int = 10, pv: int = 6, ph: int = 10) -> StyleBoxFlat:
+	var sb := _sb_plain(color, radius)
+	sb.content_margin_top = pv
+	sb.content_margin_bottom = pv
+	sb.content_margin_left = ph
+	sb.content_margin_right = ph
+	return sb
+
+## 버튼을 지정 색(bg/글자)으로 스타일링(상태별 포함)
+func _style_button(b: Button, bg: Color, fg: Color, radius: int = 12, pv: int = 6, ph: int = 10) -> void:
+	b.add_theme_stylebox_override("normal", _sb_pad(bg, radius, pv, ph))
+	b.add_theme_stylebox_override("hover", _sb_pad(bg.lightened(0.06), radius, pv, ph))
+	b.add_theme_stylebox_override("pressed", _sb_pad(bg.darkened(0.08), radius, pv, ph))
+	var dis := _sb_pad(bg, radius, pv, ph); dis.bg_color = Color(bg.r, bg.g, bg.b, 0.45)
+	b.add_theme_stylebox_override("disabled", dis)
+	b.add_theme_stylebox_override("focus", _sb_pad(Color.TRANSPARENT, radius, pv, ph))
+	for st in ["font_color", "font_hover_color", "font_pressed_color", "font_focus_color"]:
+		b.add_theme_color_override(st, fg)
+	b.add_theme_color_override("font_disabled_color", Color(fg.r, fg.g, fg.b, 0.5))
+
 func _apply_theme_colors(th: Theme) -> void:
 	var t := GameState.col("text")
 	for cls in ["Label", "Button", "CheckBox", "LineEdit"]:
@@ -102,6 +131,33 @@ func _apply_theme_colors(th: Theme) -> void:
 	th.set_color("font_hover_color", "CheckBox", t)
 	th.set_color("font_pressed_color", "CheckBox", t)
 	th.set_color("default_color", "RichTextLabel", t)
+
+	# --- 기본 위젯 스타일(둥근 형태로 통일) ---
+	var btn := GameState.col("slot")
+	th.set_stylebox("normal", "Button", _sb_pad(btn, 10))
+	th.set_stylebox("hover", "Button", _sb_pad(btn.lightened(0.05), 10))
+	th.set_stylebox("pressed", "Button", _sb_pad(btn.darkened(0.07), 10))
+	var bd := _sb_pad(btn, 10); bd.bg_color = Color(btn.r, btn.g, btn.b, 0.45)
+	th.set_stylebox("disabled", "Button", bd)
+	th.set_stylebox("focus", "Button", _sb_pad(Color.TRANSPARENT, 10))
+
+	var le := _sb_pad(GameState.col("panel"), 8)
+	le.set_border_width_all(1)
+	le.border_color = GameState.col("border")
+	th.set_stylebox("normal", "LineEdit", le)
+	th.set_stylebox("focus", "LineEdit", le)
+
+	th.set_stylebox("background", "ProgressBar", _sb_plain(GameState.col("track"), 7))
+	th.set_stylebox("fill", "ProgressBar", _sb_plain(GameState.col("progress"), 7))
+
+	th.set_stylebox("panel", "PanelContainer", _sb_card(GameState.col("panel"), 14))
+
+## 카드/패널용 둥근 스타일(넉넉한 내부 여백)
+func _sb_card(color: Color, radius: int = 14) -> StyleBoxFlat:
+	var sb := _sb_plain(color, radius)
+	for m in ["content_margin_left", "content_margin_right", "content_margin_top", "content_margin_bottom"]:
+		sb.set(m, 10)
+	return sb
 
 ## 테마 변경 시 UI 를 통째로 다시 만들어 모든 색을 새 팔레트로 갱신한다.
 func _rebuild_ui() -> void:
@@ -136,30 +192,39 @@ func _build_ui() -> void:
 
 	var margin := MarginContainer.new()
 	margin.set_anchors_preset(Control.PRESET_FULL_RECT)
-	margin.add_theme_constant_override("margin_left", 14)
-	margin.add_theme_constant_override("margin_right", 14)
-	margin.add_theme_constant_override("margin_top", 10)
+	margin.add_theme_constant_override("margin_left", 16)
+	margin.add_theme_constant_override("margin_right", 16)
+	margin.add_theme_constant_override("margin_top", 12)
 	margin.add_theme_constant_override("margin_bottom", 12)
 	margin.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_root.add_child(margin)
 
 	var vb := VBoxContainer.new()
-	vb.add_theme_constant_override("separation", 9)
+	vb.add_theme_constant_override("separation", 10)
 	vb.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	margin.add_child(vb)
 
-	# --- 헤더 ---
+	# --- 헤더 (제목 + 부제 + 코인 + 메뉴) ---
 	var header := HBoxContainer.new()
-	header.add_theme_constant_override("separation", 4)
+	header.add_theme_constant_override("separation", 6)
 	vb.add_child(header)
+	var titlebox := VBoxContainer.new()
+	titlebox.add_theme_constant_override("separation", 0)
+	titlebox.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	titlebox.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	header.add_child(titlebox)
 	var title := Label.new()
-	title.text = "🧪 물약 공방"
-	title.add_theme_font_size_override("font_size", 18)
-	title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	title.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-	header.add_child(title)
+	title.text = "물약 공방"
+	title.add_theme_font_size_override("font_size", 20)
+	title.add_theme_color_override("font_color", GameState.col("text"))
+	titlebox.add_child(title)
+	var subtitle := Label.new()
+	subtitle.text = "Your cozy work companion"
+	subtitle.add_theme_font_size_override("font_size", 11)
+	subtitle.add_theme_color_override("font_color", GameState.col("subtitle"))
+	titlebox.add_child(subtitle)
 	coins_label = Label.new()
-	coins_label.add_theme_font_size_override("font_size", 16)
+	coins_label.add_theme_font_size_override("font_size", 15)
 	coins_label.add_theme_color_override("font_color", GameState.col("gold"))
 	coins_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	header.add_child(coins_label)
@@ -192,36 +257,50 @@ func _build_ui() -> void:
 	xp_text.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	lv_row.add_child(xp_text)
 
-	# --- 항아리 (재료 드롭 대상) ---
-	cauldron = CauldronView.new()
-	cauldron.custom_minimum_size = Vector2(0, 210)
-	cauldron.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	cauldron.mouse_filter = Control.MOUSE_FILTER_STOP
-	cauldron.ingredient_dropped.connect(_on_add_ingredient)
-	vb.add_child(cauldron)
+	# --- 상태 (● 상태) ---
+	status_label = Label.new()
+	status_label.add_theme_font_size_override("font_size", 13)
+	status_label.add_theme_color_override("font_color", GameState.col("success"))
+	status_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	vb.add_child(status_label)
 
-	# --- 진행 바 + 상태 ---
+	# --- 진행 바 ---
 	progress_bar = ProgressBar.new()
 	progress_bar.min_value = 0.0
 	progress_bar.max_value = 1.0
 	progress_bar.show_percentage = false
-	progress_bar.custom_minimum_size = Vector2(0, 10)
+	progress_bar.custom_minimum_size = Vector2(0, 14)
 	progress_bar.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	vb.add_child(progress_bar)
 
-	status_label = Label.new()
-	status_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	status_label.add_theme_font_size_override("font_size", 13)
-	status_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	vb.add_child(status_label)
+	# --- 남은 시간 안내 ---
+	remain_label = Label.new()
+	remain_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	remain_label.add_theme_font_size_override("font_size", 12)
+	remain_label.add_theme_color_override("font_color", GameState.col("text_muted"))
+	remain_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	vb.add_child(remain_label)
 
-	# --- 항아리 슬롯 ---
+	# --- 캐릭터 카드 ---
+	var card := PanelContainer.new()
+	card.add_theme_stylebox_override("panel", _sb_card(GameState.col("card"), 16))
+	card.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	vb.add_child(card)
+	cauldron = CauldronView.new()
+	cauldron.custom_minimum_size = Vector2(0, 170)
+	cauldron.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	cauldron.mouse_filter = Control.MOUSE_FILTER_STOP
+	cauldron.ingredient_dropped.connect(_on_add_ingredient)
+	cauldron.character_tex = _load_character_tex()
+	card.add_child(cauldron)
+
+	# --- 항아리 슬롯 + 비우기 ---
 	var jar_head := HBoxContainer.new()
 	jar_head.add_theme_constant_override("separation", 6)
 	jar_head.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	vb.add_child(jar_head)
 	jar_slots_row = HBoxContainer.new()
-	jar_slots_row.add_theme_constant_override("separation", 6)
+	jar_slots_row.add_theme_constant_override("separation", 8)
 	jar_slots_row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	jar_head.add_child(jar_slots_row)
 	clear_btn = Button.new()
@@ -230,31 +309,23 @@ func _build_ui() -> void:
 	clear_btn.pressed.connect(func(): GameState.clear_jar())
 	jar_head.add_child(clear_btn)
 
-	# --- 가방 ---
-	var bag_label := Label.new()
-	bag_label.text = "🎒 가방 — 재료를 항아리로 끌어넣거나 클릭"
-	bag_label.add_theme_font_size_override("font_size", 12)
-	bag_label.add_theme_color_override("font_color", GameState.col("text_dim"))
-	bag_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	vb.add_child(bag_label)
+	# --- 제작하기 버튼 ---
+	brew_btn = Button.new()
+	brew_btn.text = "제작하기"
+	brew_btn.custom_minimum_size = Vector2(0, 48)
+	brew_btn.focus_mode = Control.FOCUS_NONE
+	brew_btn.add_theme_font_size_override("font_size", 19)
+	_style_button(brew_btn, GameState.col("accent"), GameState.col("accent_text"), 14, 10, 12)
+	brew_btn.pressed.connect(_on_brew_pressed)
+	vb.add_child(brew_btn)
 
-	bag_grid = GridContainer.new()
-	bag_grid.columns = 4
-	bag_grid.add_theme_constant_override("h_separation", 6)
-	bag_grid.add_theme_constant_override("v_separation", 6)
-	vb.add_child(bag_grid)
-	for id in Recipes.INGREDIENTS.keys():
-		var info = Recipes.INGREDIENTS[id]
-		var b := BagItem.new()
-		b.ing_id = id
-		b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		b.clip_text = true
-		b.focus_mode = Control.FOCUS_NONE
-		b.add_theme_color_override("font_color", info.color)
-		var cap_id: String = id
-		b.pressed.connect(func(): _on_add_ingredient(cap_id))
-		bag_grid.add_child(b)
-		bag_buttons[id] = b
+	cancel_btn = Button.new()
+	cancel_btn.text = "제작 취소 (재료 회수)"
+	cancel_btn.custom_minimum_size = Vector2(0, 40)
+	cancel_btn.focus_mode = Control.FOCUS_NONE
+	cancel_btn.pressed.connect(func(): GameState.cancel_brew())
+	cancel_btn.visible = false
+	vb.add_child(cancel_btn)
 
 	# --- 제작 시간(텍스트 입력) ---
 	var time_row := HBoxContainer.new()
@@ -279,7 +350,7 @@ func _build_ui() -> void:
 	minlab.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	time_row.add_child(minlab)
 
-	# --- 예상 등급 확률 (시간이 길수록 상위 등급↑) ---
+	# --- 예상 등급 확률 ---
 	grade_hint = RichTextLabel.new()
 	grade_hint.bbcode_enabled = true
 	grade_hint.fit_content = true
@@ -288,26 +359,46 @@ func _build_ui() -> void:
 	grade_hint.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	vb.add_child(grade_hint)
 
-	# --- 제작 / 취소 버튼 ---
-	brew_btn = Button.new()
-	brew_btn.text = "제작 시작"
-	brew_btn.custom_minimum_size = Vector2(0, 42)
-	brew_btn.focus_mode = Control.FOCUS_NONE
-	brew_btn.add_theme_font_size_override("font_size", 18)
-	brew_btn.pressed.connect(_on_brew_pressed)
-	vb.add_child(brew_btn)
+	# --- 점선 구분 ---
+	var divider := Label.new()
+	divider.text = "· · · · · · · · · · · · · · · · · · · · · · · ·"
+	divider.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	divider.add_theme_color_override("font_color", GameState.col("text_ghost"))
+	divider.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	vb.add_child(divider)
 
-	cancel_btn = Button.new()
-	cancel_btn.text = "제작 취소 (재료 회수)"
-	cancel_btn.focus_mode = Control.FOCUS_NONE
-	cancel_btn.pressed.connect(func(): GameState.cancel_brew())
-	cancel_btn.visible = false
-	vb.add_child(cancel_btn)
+	# --- 재료 가방 ---
+	var bag_label := Label.new()
+	bag_label.text = "재료 가방"
+	bag_label.add_theme_font_size_override("font_size", 13)
+	bag_label.add_theme_color_override("font_color", GameState.col("text_muted"))
+	bag_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	vb.add_child(bag_label)
+
+	bag_grid = GridContainer.new()
+	bag_grid.columns = 4
+	bag_grid.add_theme_constant_override("h_separation", 8)
+	bag_grid.add_theme_constant_override("v_separation", 8)
+	vb.add_child(bag_grid)
+	for id in Recipes.INGREDIENTS.keys():
+		var info = Recipes.INGREDIENTS[id]
+		var b := BagItem.new()
+		b.ing_id = id
+		b.custom_minimum_size = Vector2(0, 44)
+		b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		b.clip_text = true
+		b.focus_mode = Control.FOCUS_NONE
+		b.add_theme_font_size_override("font_size", 12)
+		b.add_theme_color_override("font_color", info.color)
+		var cap_id: String = id
+		b.pressed.connect(func(): _on_add_ingredient(cap_id))
+		bag_grid.add_child(b)
+		bag_buttons[id] = b
 
 	# --- 감지 상태(작게) ---
 	detect_label = Label.new()
 	detect_label.add_theme_font_size_override("font_size", 11)
-	detect_label.add_theme_color_override("font_color", GameState.col("text_ghost"))
+	detect_label.add_theme_color_override("font_color", GameState.col("text_faint"))
 	detect_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	detect_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	detect_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -318,12 +409,18 @@ func _build_ui() -> void:
 	# --- 토스트 ---
 	toast_label = Label.new()
 	toast_label.set_anchors_preset(Control.PRESET_CENTER_TOP)
-	toast_label.position = Vector2(0, 54)
+	toast_label.position = Vector2(0, 96)
 	toast_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	toast_label.add_theme_font_size_override("font_size", 19)
+	toast_label.add_theme_font_size_override("font_size", 18)
 	toast_label.modulate = Color(1, 1, 1, 0)
 	toast_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_root.add_child(toast_label)
+
+## 캐릭터 일러스트를 로드(없으면 null → 코드 항아리 그림으로 대체)
+func _load_character_tex() -> Texture2D:
+	if ResourceLoader.exists("res://assets/character.png"):
+		return load("res://assets/character.png")
+	return null
 
 func _mk_icon_button(txt: String, cb: Callable) -> Button:
 	var b := Button.new()
@@ -542,7 +639,7 @@ func refresh_jar_slots() -> void:
 	var colors := []
 	for i in range(GameState.MAX_INGREDIENTS):
 		var slot := Button.new()
-		slot.custom_minimum_size = Vector2(0, 30)
+		slot.custom_minimum_size = Vector2(0, 46)
 		slot.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		slot.focus_mode = Control.FOCUS_NONE
 		slot.clip_text = true
@@ -560,6 +657,8 @@ func refresh_jar_slots() -> void:
 		else:
 			slot.text = "＋"
 			slot.disabled = true
+			slot.add_theme_font_size_override("font_size", 20)
+			slot.add_theme_color_override("font_disabled_color", GameState.col("slot_fg"))
 		jar_slots_row.add_child(slot)
 	cauldron.liquid_colors = colors
 
@@ -574,7 +673,7 @@ func refresh_controls() -> void:
 	for id in bag_buttons.keys():
 		var b: Button = bag_buttons[id]
 		var stock := GameState.available_stock(id)
-		b.text = "● %s (%d)" % [Recipes.ingredient_name(id), stock]
+		b.text = "%s %d" % [Recipes.ingredient_name(id), stock]
 		b.disabled = brewing or jar_full or stock <= 0
 	_refresh_coins()
 	_update_grade_hint()
@@ -588,18 +687,22 @@ func refresh_status() -> void:
 		var p := GameState.brew_progress()
 		progress_bar.value = p
 		var real_remain := GameState.brew_remaining_sec() / maxf(GameState.time_scale, 0.001)
-		var st := "제작 중… %d%%" % int(p * 100)
 		if GameState.brew.active:
-			st += "  ·  남은 활동시간 %s" % _fmt_time(real_remain)
+			status_label.text = "● 일하는 중 (%d%%)" % int(p * 100)
+			status_label.add_theme_color_override("font_color", GameState.col("success"))
+			remain_label.text = "완성까지 %s 남았어요." % _fmt_time(real_remain)
 		else:
-			st += "  ·  대기 중 (등록한 앱을 사용하세요)"
-		status_label.text = st
+			status_label.text = "● 대기 중 (%d%%)" % int(p * 100)
+			status_label.add_theme_color_override("font_color", GameState.col("text_dim"))
+			remain_label.text = "등록한 앱을 사용하면 제작이 진행돼요."
 	else:
 		progress_bar.value = 0.0
+		status_label.text = "● 준비"
+		status_label.add_theme_color_override("font_color", GameState.col("success"))
 		if GameState.jar_ingredients.is_empty():
-			status_label.text = "재료를 항아리에 넣고 제작을 시작하세요"
+			remain_label.text = "재료를 항아리에 넣고 제작을 시작하세요."
 		else:
-			status_label.text = "준비 완료 — 제작을 시작하세요"
+			remain_label.text = "준비 완료 — 제작을 시작하세요."
 	detect_label.text = Watcher.status_text()
 
 func _fmt_time(sec: float) -> String:

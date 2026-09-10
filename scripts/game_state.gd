@@ -51,23 +51,33 @@ var registered_apps: Array = []
 # 설정
 var time_scale: float = 1.0        # 제작 속도 배율(테스트용)
 var force_active: bool = false      # true 면 PC 사용 여부와 무관하게 항상 진행
-var theme_mode: String = "dark"    # 화면 테마: "dark" | "light"
+var theme_mode: String = "light"   # 화면 테마: "light"(아늑한 크림) | "dark"
 
-## 현재 테마에 맞는 UI 색상을 역할(role) 이름으로 반환한다.
+## 현재 테마에 맞는 UI 색상을 역할(role) 이름으로 반환한다. (아늑한 크림/세이지 톤)
 ## 재료/물약/등급 등 콘텐츠 색은 여기서 다루지 않고 각자 색을 유지한다.
 func col(role: String) -> Color:
 	var light := theme_mode == "light"
 	match role:
-		"bg":         return Color("f4f0fa") if light else Color("1d1830")  # 창 배경
-		"panel":      return Color("ffffff") if light else Color("221c38")  # 오버레이 패널
-		"text":       return Color("2a2340") if light else Color("ece8f7")  # 기본 글자
-		"text_muted": return Color("585074") if light else Color("b9aee0")  # 보조 글자
-		"text_dim":   return Color("6f6690") if light else Color("9a90bc")  # 흐린 글자
-		"text_faint": return Color("857b9e") if light else Color("8a80a6")  # 더 흐린 글자
-		"text_ghost": return Color("9a92b0") if light else Color("6f6690")  # 가장 흐린 글자
-		"gold":       return Color("b8860b") if light else Color("ffd447")  # 코인/강조
-		"success":    return Color("2e8b57") if light else Color("7fd0a0")  # 성공/감지
-	return Color("2a2340") if light else Color("ece8f7")
+		"bg":          return Color("f6f1e7") if light else Color("221c2b")  # 창 배경(크림)
+		"panel":       return Color("fffdf8") if light else Color("2c2540")  # 오버레이/카드 바탕
+		"card":        return Color("eef0e1") if light else Color("322b46")  # 캐릭터 카드 바탕
+		"text":        return Color("46412f") if light else Color("efe9f5")  # 기본/제목 글자
+		"subtitle":    return Color("aa9f89") if light else Color("8b83a0")  # 부제목
+		"text_muted":  return Color("7c735d") if light else Color("b9aed0")  # 보조 글자
+		"text_dim":    return Color("9a917a") if light else Color("9a90b8")  # 흐린 글자
+		"text_faint":  return Color("b3ab96") if light else Color("82789c")  # 더 흐린 글자
+		"text_ghost":  return Color("c8c0ac") if light else Color("6b6288")  # 가장 흐린 글자
+		"gold":        return Color("d99f28") if light else Color("ffd35a")  # 코인/강조
+		"success":     return Color("6f9438") if light else Color("8fd0a0")  # 성공/감지(초록 점)
+		"accent":      return Color("93a961") if light else Color("8ba05a")  # 메인 초록(버튼)
+		"accent_dark": return Color("7e944e") if light else Color("738a4a")  # 초록 눌림/테두리
+		"accent_text": return Color("ffffff")                                 # 초록 버튼 글자
+		"slot":        return Color("cec8bc") if light else Color("3a3352")  # 슬롯/가방 칸
+		"slot_fg":     return Color("8b8676") if light else Color("8a80a6")  # 빈 슬롯 '+' 색
+		"track":       return Color("e7e0d0") if light else Color("39324e")  # 진행바 트랙
+		"progress":    return Color("efb638") if light else Color("f0c04a")  # 진행바 채움(골드)
+		"border":      return Color("e6dfce") if light else Color("3f3858")  # 카드 테두리
+	return Color("46412f") if light else Color("efe9f5")
 
 ## 테마를 변경하고 저장 후 알린다.
 func set_theme_mode(mode: String) -> void:
@@ -358,9 +368,9 @@ func load_game() -> void:
 	registered_apps = data.get("apps", [])
 	time_scale = float(data.get("time_scale", 1.0))
 	force_active = bool(data.get("force_active", false))
-	theme_mode = String(data.get("theme", "dark"))
+	theme_mode = String(data.get("theme", "light"))
 	if theme_mode != "dark" and theme_mode != "light":
-		theme_mode = "dark"
+		theme_mode = "light"
 	coins = int(data.get("coins", coins))
 	level = maxi(1, int(data.get("level", 1)))
 	xp = maxi(0, int(data.get("xp", 0)))

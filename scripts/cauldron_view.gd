@@ -12,6 +12,7 @@ var active: bool = false            # 현재 PC 사용 중(진행 중)인지
 var progress: float = 0.0          # 0..1
 var liquid_colors: Array = []      # 항아리에 담긴 재료 색 목록(Color)
 var result_flash: float = 0.0      # 완성 연출용(0..1, main 이 트리거)
+var character_tex: Texture2D = null  # 중앙 캐릭터 일러스트(없으면 코드 항아리 그림)
 
 var _t: float = 0.0
 var _bubbles: Array = []           # {x, y, r, speed}
@@ -75,6 +76,10 @@ func _ellipse(center: Vector2, rx: float, ry: float, n: int = 28) -> PackedVecto
 func _draw() -> void:
 	var w := size.x
 	var h := size.y
+	# 캐릭터 일러스트가 있으면 그것을 표시하고 코드 항아리는 그리지 않는다.
+	if character_tex != null:
+		_draw_character_image(w, h)
+		return
 	var cx := w * 0.5
 
 	# --- 좌표 기준 ---
@@ -149,6 +154,30 @@ func _draw() -> void:
 	if result_flash > 0.0:
 		var a := result_flash
 		draw_colored_polygon(_ellipse(Vector2(pot_cx, liquid_top_y), liq_top_r * (1.3 + (1.0 - a)), liq_top_r * 0.6 * (1.3 + (1.0 - a))), Color(1, 1, 0.8, 0.35 * a))
+
+func _draw_character_image(w: float, h: float) -> void:
+	var tex_size := character_tex.get_size()
+	if tex_size.x <= 0.0 or tex_size.y <= 0.0:
+		return
+	# 카드 안에 비율 유지로 맞춤(contain)
+	var pad := 4.0
+	var scale := minf((w - pad * 2.0) / tex_size.x, (h - pad * 2.0) / tex_size.y)
+	var draw_size := tex_size * scale
+	# 제작 중이면 살짝 둥실
+	var bob := 0.0
+	if brewing and active:
+		bob = sin(_t * 3.0) * 3.0
+	elif brewing and not active:
+		bob = sin(_t * 1.2) * 1.5
+	var pos := Vector2((w - draw_size.x) * 0.5, (h - draw_size.y) * 0.5 + bob)
+	draw_texture_rect(character_tex, Rect2(pos, draw_size), false)
+	# 대기 중이면 Zzz
+	if brewing and not active:
+		_draw_zzz(Vector2(w * 0.72, h * 0.16))
+	# 완성 반짝임
+	if result_flash > 0.0:
+		var a := result_flash
+		draw_circle(Vector2(w * 0.5, h * 0.5), draw_size.x * 0.5 * (1.15 + (1.0 - a) * 0.4), Color(1, 1, 0.8, 0.18 * a))
 
 func _close(p: PackedVector2Array) -> PackedVector2Array:
 	var q = p.duplicate()
