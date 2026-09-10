@@ -4,6 +4,16 @@ extends Control
 const CauldronView := preload("res://scripts/cauldron_view.gd")
 const BagItem := preload("res://scripts/bag_item.gd")
 
+# 우측 세로 탭 레일 정의 (위→아래)
+const TABS := [
+	{"id": "home", "icon": "🏠", "name": "홈"},
+	{"id": "garden", "icon": "🌱", "name": "농장"},
+	{"id": "inventory", "icon": "📦", "name": "보관함"},
+	{"id": "shop", "icon": "🛒", "name": "상점"},
+	{"id": "recipes", "icon": "📖", "name": "도감"},
+	{"id": "settings", "icon": "⚙", "name": "설정"},
+]
+
 var cauldron: Control
 var status_label: Label
 var remain_label: Label
@@ -26,7 +36,13 @@ var xp_text: Label
 # 전체 UI 루트(테마 변경 시 통째로 다시 만든다)
 var _root: Control
 
-# 오버레이(상점/보관함/도감/설정)
+# 좌측 콘텐츠 영역(오버레이가 이 위에만 덮이고 우측 레일은 항상 보임)
+var _left_col: Control
+# 우측 탭 레일
+var tab_buttons: Dictionary = {}
+var _notified_unlocks: Dictionary = {}
+
+# 오버레이(상점/보관함/도감/설정/농장)
 var overlay: PanelContainer
 var overlay_title: Label
 var overlay_content: VBoxContainer
@@ -66,6 +82,9 @@ func _ready() -> void:
 	add_child(t)
 
 	_was_brewing = GameState.brew != null
+	for tab in TABS:
+		if GameState.is_unlocked(tab.id):
+			_notified_unlocks[tab.id] = true
 	refresh_all()
 
 func _load_korean_font() -> FontFile:
@@ -190,21 +209,37 @@ func _build_ui() -> void:
 	bg.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_root.add_child(bg)
 
+	# 좌: 콘텐츠 영역 / 우: 세로 탭 레일
+	var root_h := HBoxContainer.new()
+	root_h.set_anchors_preset(Control.PRESET_FULL_RECT)
+	root_h.add_theme_constant_override("separation", 8)
+	root_h.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_root.add_child(root_h)
+
+	_left_col = Control.new()
+	_left_col.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_left_col.size_flags_vertical = Control.SIZE_FILL
+	_left_col.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	root_h.add_child(_left_col)
+
 	var margin := MarginContainer.new()
 	margin.set_anchors_preset(Control.PRESET_FULL_RECT)
 	margin.add_theme_constant_override("margin_left", 16)
-	margin.add_theme_constant_override("margin_right", 16)
+	margin.add_theme_constant_override("margin_right", 4)
 	margin.add_theme_constant_override("margin_top", 12)
 	margin.add_theme_constant_override("margin_bottom", 12)
 	margin.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	_root.add_child(margin)
+	_left_col.add_child(margin)
 
 	var vb := VBoxContainer.new()
 	vb.add_theme_constant_override("separation", 10)
 	vb.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	margin.add_child(vb)
 
-	# --- 헤더 (제목 + 부제 + 코인 + 메뉴) ---
+	# 우측 탭 레일
+	_build_rail(root_h)
+
+	# --- 헤더 (제목 + 부제 + 코인) ---
 	var header := HBoxContainer.new()
 	header.add_theme_constant_override("separation", 6)
 	vb.add_child(header)
@@ -228,10 +263,6 @@ func _build_ui() -> void:
 	coins_label.add_theme_color_override("font_color", GameState.col("gold"))
 	coins_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	header.add_child(coins_label)
-	header.add_child(_mk_icon_button("🛒", func(): _open_panel("shop")))
-	header.add_child(_mk_icon_button("🎒", func(): _open_panel("inventory")))
-	header.add_child(_mk_icon_button("📖", func(): _open_panel("recipes")))
-	header.add_child(_mk_icon_button("⚙", func(): _open_panel("settings")))
 
 	# --- 레벨 / 경험치 ---
 	var lv_row := HBoxContainer.new()
@@ -431,6 +462,69 @@ func _mk_icon_button(txt: String, cb: Callable) -> Button:
 	b.pressed.connect(cb)
 	return b
 
+# ============================================================
+# 우측 탭 레일 (레벨 해금)
+# ============================================================
+func _build_rail(parent: Control) -> void:
+	tab_buttons.clear()
+	var rail := VBoxContainer.new()
+	rail.add_theme_constant_override("separation", 8)
+	rail.custom_minimum_size = Vector2(52, 0)
+	rail.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	parent.add_child(rail)
+	for tab in TABS:
+		var b := Button.new()
+		b.custom_minimum_size = Vector2(48, 48)
+		b.focus_mode = Control.FOCUS_NONE
+		b.add_theme_font_size_override("font_size", 20)
+		var tid: String = tab.id
+		b.pressed.connect(func(): _on_tab_pressed(tid))
+		rail.add_child(b)
+		tab_buttons[tab.id] = b
+	_refresh_rail()
+
+func _refresh_rail() -> void:
+	for tab in TABS:
+		if not tab_buttons.has(tab.id):
+			continue
+		var b: Button = tab_buttons[tab.id]
+		var unlocked := GameState.is_unlocked(tab.id)
+		var active: bool = (tab.id == "home" and current_panel == "") or (tab.id == current_panel)
+		if not unlocked:
+			b.text = "🔒"
+			b.tooltip_text = "%s — Lv.%d에 해금" % [tab.name, GameState.unlock_level(tab.id)]
+			_style_button(b, GameState.col("accent_dark"), Color(1, 1, 1, 0.85), 12, 6, 6)
+		else:
+			b.text = tab.icon
+			b.tooltip_text = tab.name
+			if active:
+				_style_button(b, GameState.col("accent"), GameState.col("accent_text"), 12, 6, 6)
+			else:
+				_style_button(b, GameState.col("panel"), GameState.col("text"), 12, 6, 6)
+
+func _on_tab_pressed(id: String) -> void:
+	if not GameState.is_unlocked(id):
+		_show_toast("%s은(는) Lv.%d에 해금돼요" % [_tab_name(id), GameState.unlock_level(id)])
+		return
+	if id == "home":
+		_close_panel()
+	else:
+		_open_panel(id)
+
+func _tab_name(id: String) -> String:
+	for tab in TABS:
+		if tab.id == id:
+			return tab.name
+	return id
+
+func _fill_garden() -> void:
+	_clear_overlay()
+	var e := Label.new()
+	e.text = "🌱 농장 기능은 준비 중이에요.\n곧 재료를 직접 길러볼 수 있게 만들 예정이에요!"
+	e.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	e.add_theme_color_override("font_color", GameState.col("text_muted"))
+	overlay_content.add_child(e)
+
 func _build_overlay() -> void:
 	overlay = PanelContainer.new()
 	overlay.set_anchors_preset(Control.PRESET_FULL_RECT)
@@ -442,7 +536,7 @@ func _build_overlay() -> void:
 	sb.content_margin_top = 12
 	sb.content_margin_bottom = 12
 	overlay.add_theme_stylebox_override("panel", sb)
-	_root.add_child(overlay)
+	_left_col.add_child(overlay)
 
 	var ov := VBoxContainer.new()
 	ov.add_theme_constant_override("separation", 8)
@@ -628,8 +722,18 @@ func _refresh_level() -> void:
 
 func _on_level_up() -> void:
 	_refresh_level()
-	var bonus := int(round(GameState.level_bonus() * 100.0))
-	_show_toast("⚗ 레벨 업! Lv.%d — 품질 보너스 +%d%%" % [GameState.level, bonus], GameState.col("gold"))
+	_refresh_rail()
+	var newly := []
+	for tab in TABS:
+		if tab.id == "home" or tab.id == "settings":
+			continue
+		if GameState.is_unlocked(tab.id) and not _notified_unlocks.has(tab.id):
+			_notified_unlocks[tab.id] = true
+			newly.append(tab.name)
+	var msg := "⚗ 레벨 업! Lv.%d" % GameState.level
+	if not newly.is_empty():
+		msg += "  ·  🔓 " + ", ".join(newly)
+	_show_toast(msg, GameState.col("gold"))
 
 func refresh_jar_slots() -> void:
 	for c in jar_slots_row.get_children():
@@ -727,7 +831,7 @@ func _open_panel(which: String) -> void:
 			overlay_title.text = "🛒 상점"
 			_fill_shop()
 		"inventory":
-			overlay_title.text = "🎒 보관함"
+			overlay_title.text = "📦 보관함"
 			_fill_inventory()
 		"recipes":
 			overlay_title.text = "📖 레시피 도감"
@@ -735,10 +839,15 @@ func _open_panel(which: String) -> void:
 		"settings":
 			overlay_title.text = "⚙ 설정"
 			_fill_settings()
+		"garden":
+			overlay_title.text = "🌱 농장"
+			_fill_garden()
+	_refresh_rail()
 
 func _close_panel() -> void:
 	current_panel = ""
 	overlay.visible = false
+	_refresh_rail()
 
 func _clear_overlay() -> void:
 	for c in overlay_content.get_children():

@@ -24,7 +24,7 @@ Watcher="*res://scripts/foreground_watcher.gd"
 
 [display]
 
-window/size/viewport_width=440
+window/size/viewport_width=510
 window/size/viewport_height=820
 window/size/resizable=false
 window/size/always_on_top=true

@@ -90,6 +90,17 @@ func set_theme_mode(mode: String) -> void:
 	theme_changed.emit()
 
 # ---------- 레벨 / 경험치 ----------
+# 기능(탭) 해금에 필요한 레벨. 홈/설정은 항상 열림(Lv.1).
+const UNLOCK_LEVELS := {
+	"home": 1, "settings": 1, "inventory": 2, "shop": 3, "recipes": 5, "garden": 7,
+}
+
+func unlock_level(feature: String) -> int:
+	return int(UNLOCK_LEVELS.get(feature, 1))
+
+func is_unlocked(feature: String) -> bool:
+	return level >= unlock_level(feature)
+
 ## 다음 레벨까지 필요한 경험치.
 func xp_for_next() -> int:
 	return 40 + level * 30
