@@ -18,6 +18,9 @@ var cancel_btn: Button
 var detect_label: Label
 var coins_label: Label
 var toast_label: Label
+var lv_label: Label
+var xp_bar: ProgressBar
+var xp_text: Label
 
 # 전체 UI 루트(테마 변경 시 통째로 다시 만든다)
 var _root: Control
@@ -164,6 +167,30 @@ func _build_ui() -> void:
 	header.add_child(_mk_icon_button("🎒", func(): _open_panel("inventory")))
 	header.add_child(_mk_icon_button("📖", func(): _open_panel("recipes")))
 	header.add_child(_mk_icon_button("⚙", func(): _open_panel("settings")))
+
+	# --- 레벨 / 경험치 ---
+	var lv_row := HBoxContainer.new()
+	lv_row.add_theme_constant_override("separation", 6)
+	lv_row.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	vb.add_child(lv_row)
+	lv_label = Label.new()
+	lv_label.add_theme_font_size_override("font_size", 13)
+	lv_label.add_theme_color_override("font_color", GameState.col("gold"))
+	lv_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	lv_row.add_child(lv_label)
+	xp_bar = ProgressBar.new()
+	xp_bar.min_value = 0.0
+	xp_bar.show_percentage = false
+	xp_bar.custom_minimum_size = Vector2(0, 8)
+	xp_bar.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	xp_bar.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	xp_bar.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	lv_row.add_child(xp_bar)
+	xp_text = Label.new()
+	xp_text.add_theme_font_size_override("font_size", 11)
+	xp_text.add_theme_color_override("font_color", GameState.col("text_dim"))
+	xp_text.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	lv_row.add_child(xp_text)
 
 	# --- 항아리 (재료 드롭 대상) ---
 	cauldron = CauldronView.new()
@@ -349,6 +376,8 @@ func _connect_signals() -> void:
 	GameState.coins_changed.connect(_on_coins_changed)
 	GameState.stock_changed.connect(_on_stock_changed)
 	GameState.theme_changed.connect(_rebuild_ui)
+	GameState.xp_changed.connect(_refresh_level)
+	GameState.level_changed.connect(_on_level_up)
 
 # ============================================================
 # 창 본문 드래그 이동
@@ -410,7 +439,9 @@ func _update_grade_hint() -> void:
 	var res := Recipes.resolve(GameState.jar_ingredients, float(m))
 	var p: Array
 	if res.id != "unknown" and res.id != "failure":
-		p = Recipes.grade_probabilities_for(float(m), float(res.get("min", 1)), float(res.get("max", 1)))
+		# 레시피 시간범위 내 위치 + 레벨 품질 보너스
+		var q := Recipes.time_ratio(float(m), float(res.get("min", 1)), float(res.get("max", 1))) + GameState.level_bonus()
+		p = Recipes.grade_probabilities_ratio(q)
 	else:
 		p = [1.0, 0.0, 0.0]
 	grade_hint.text = "예상 등급   [color=#b8b8b8]★일반 %d%%[/color]    [color=#5fd06a]★희귀 %d%%[/color]    [color=#4a9bff]★고급 %d%%[/color]" % [roundi(p[0] * 100), roundi(p[1] * 100), roundi(p[2] * 100)]
@@ -487,6 +518,21 @@ func refresh_all() -> void:
 	refresh_jar_slots()
 	refresh_controls()
 	refresh_status()
+	_refresh_level()
+
+func _refresh_level() -> void:
+	if lv_label == null:
+		return
+	var need := GameState.xp_for_next()
+	lv_label.text = "⚗ Lv.%d" % GameState.level
+	xp_bar.max_value = need
+	xp_bar.value = GameState.xp
+	xp_text.text = "%d/%d XP" % [GameState.xp, need]
+
+func _on_level_up() -> void:
+	_refresh_level()
+	var bonus := int(round(GameState.level_bonus() * 100.0))
+	_show_toast("⚗ 레벨 업! Lv.%d — 품질 보너스 +%d%%" % [GameState.level, bonus], GameState.col("gold"))
 
 func refresh_jar_slots() -> void:
 	for c in jar_slots_row.get_children():

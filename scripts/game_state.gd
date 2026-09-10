@@ -9,12 +9,18 @@ signal apps_changed
 signal coins_changed
 signal stock_changed
 signal theme_changed
+signal xp_changed
+signal level_changed
 
 const SAVE_PATH := "user://save.json"
 const MAX_INGREDIENTS := 3
 
 # 보유 코인 (재화)
 var coins: int = 60
+
+# 연금술사 레벨 / 경험치
+var level: int = 1
+var xp: int = 0
 
 # 재료 재고: 재료 id -> 보유 개수 (첫 실행 기본값)
 var ingredient_stock: Dictionary = {
@@ -72,6 +78,36 @@ func set_theme_mode(mode: String) -> void:
 	theme_mode = mode
 	save_game()
 	theme_changed.emit()
+
+# ---------- 레벨 / 경험치 ----------
+## 다음 레벨까지 필요한 경험치.
+func xp_for_next() -> int:
+	return 40 + level * 30
+
+## 레벨에 따른 물약 품질(등급) 보너스. 등급 확률 계산 시 시간비율에 더해진다.
+func level_bonus() -> float:
+	return minf(0.02 * float(level - 1), 0.30)   # 레벨당 +2%, 최대 +30%
+
+## 등급에 따른 경험치 보상.
+func xp_reward(grade: int, is_real: bool) -> int:
+	if not is_real:
+		return 4
+	return [12, 28, 60][clampi(grade, 0, 2)]
+
+## 경험치를 더하고 필요 시 레벨업. 레벨업하면 level_changed 발신.
+func add_xp(amount: int) -> void:
+	if amount <= 0:
+		return
+	xp += amount
+	var leveled := false
+	while xp >= xp_for_next():
+		xp -= xp_for_next()
+		level += 1
+		leveled = true
+	xp_changed.emit()
+	if leveled:
+		level_changed.emit()
+	save_game()
 
 func _ready() -> void:
 	randomize()
@@ -169,14 +205,18 @@ func _complete_brew() -> void:
 	var result: Dictionary = Recipes.resolve(brew.ings, brew.minutes)
 	# 등급 판정: 실패작/정체불명은 항상 일반, 그 외는 레시피 시간범위 안에서의
 	# 설정시간 위치에 따라 확률적으로(범위 안에서 더 오래 끓일수록 상위 등급↑).
+	var is_real: bool = result.id != "unknown" and result.id != "failure"
 	var grade := 0
-	if result.id != "unknown" and result.id != "failure":
-		grade = Recipes.roll_grade_for(brew.minutes, float(result.get("min", 1)), float(result.get("max", 1)))
+	if is_real:
+		# 레시피 시간범위 내 위치 + 레벨 품질 보너스로 등급 판정
+		var q := Recipes.time_ratio(brew.minutes, float(result.get("min", 1)), float(result.get("max", 1))) + level_bonus()
+		grade = Recipes.roll_grade_from_ratio(q)
 	last_made_name = String(result.name)
 	last_made_grade = grade
 	_add_potion(result, grade)
 	brew = null
 	brew_changed.emit()
+	add_xp(xp_reward(grade, is_real))   # 경험치 획득 (내부에서 저장)
 	save_game()
 
 func brew_progress() -> float:
@@ -291,6 +331,8 @@ func save_game() -> void:
 		"force_active": force_active,
 		"theme": theme_mode,
 		"coins": coins,
+		"level": level,
+		"xp": xp,
 		"stock": ingredient_stock,
 	}
 	var f := FileAccess.open(SAVE_PATH, FileAccess.WRITE)
@@ -320,6 +362,8 @@ func load_game() -> void:
 	if theme_mode != "dark" and theme_mode != "light":
 		theme_mode = "dark"
 	coins = int(data.get("coins", coins))
+	level = maxi(1, int(data.get("level", 1)))
+	xp = maxi(0, int(data.get("xp", 0)))
 	var saved_stock = data.get("stock", null)
 	if typeof(saved_stock) == TYPE_DICTIONARY:
 		var s := {}

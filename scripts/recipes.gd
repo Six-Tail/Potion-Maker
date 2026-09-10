@@ -120,7 +120,11 @@ func grade_probabilities_for(minutes: float, rmin: float, rmax: float) -> Array:
 
 ## 레시피 시간범위 기준으로 등급을 확률적으로 뽑는다.
 func roll_grade_for(minutes: float, rmin: float, rmax: float) -> int:
-	var p := grade_probabilities_for(minutes, rmin, rmax)
+	return roll_grade_from_ratio(time_ratio(minutes, rmin, rmax))
+
+## 0~1 비율에서 직접 등급을 뽑는다. (레벨 품질 보너스 등을 더한 비율에 사용)
+func roll_grade_from_ratio(q: float) -> int:
+	var p := grade_probabilities_ratio(q)
 	var r := randf()
 	if r < p[0]:
 		return 0
