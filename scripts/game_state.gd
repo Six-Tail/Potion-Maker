@@ -61,11 +61,11 @@ func col(role: String) -> Color:
 		"bg":          return Color("f6f1e7") if light else Color("221c2b")  # 창 배경(크림)
 		"panel":       return Color("fffdf8") if light else Color("2c2540")  # 오버레이/카드 바탕
 		"card":        return Color("eef0e1") if light else Color("322b46")  # 캐릭터 카드 바탕
-		"text":        return Color("46412f") if light else Color("efe9f5")  # 기본/제목 글자
-		"subtitle":    return Color("aa9f89") if light else Color("8b83a0")  # 부제목
-		"text_muted":  return Color("7c735d") if light else Color("b9aed0")  # 보조 글자
-		"text_dim":    return Color("9a917a") if light else Color("9a90b8")  # 흐린 글자
-		"text_faint":  return Color("b3ab96") if light else Color("82789c")  # 더 흐린 글자
+		"text":        return Color("3a3526") if light else Color("f2edfa")  # 기본/제목 글자
+		"subtitle":    return Color("8b7f66") if light else Color("9b93b0")  # 부제목
+		"text_muted":  return Color("5c533d") if light else Color("c6bce0")  # 보조 글자
+		"text_dim":    return Color("786f58") if light else Color("a89ec6")  # 흐린 글자
+		"text_faint":  return Color("8f866e") if light else Color("8c82a6")  # 더 흐린 글자
 		"text_ghost":  return Color("c8c0ac") if light else Color("6b6288")  # 가장 흐린 글자
 		"gold":        return Color("d99f28") if light else Color("ffd35a")  # 코인/강조
 		"success":     return Color("6f9438") if light else Color("8fd0a0")  # 성공/감지(초록 점)

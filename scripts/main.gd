@@ -23,6 +23,8 @@ var clear_btn: Button
 var bag_grid: GridContainer
 var bag_buttons: Dictionary = {}   # 재료 id -> BagItem 버튼
 var time_input: LineEdit
+var time_minus: Button
+var time_plus: Button
 var grade_hint: RichTextLabel
 var brew_btn: Button
 var cancel_btn: Button
@@ -32,6 +34,7 @@ var toast_label: Label
 var lv_label: Label
 var xp_bar: ProgressBar
 var xp_text: Label
+var _bold_font: FontVariation
 
 # 전체 UI 루트(테마 변경 시 통째로 다시 만든다)
 var _root: Control
@@ -68,6 +71,10 @@ func _ready() -> void:
 	var font := _load_korean_font()
 	if font:
 		th.default_font = font
+		# 합성 볼드(별도 폰트 파일 없이 굵게)
+		_bold_font = FontVariation.new()
+		_bold_font.base_font = font
+		_bold_font.variation_embolden = 0.55
 	th.default_font_size = 15
 	_apply_theme_colors(th)
 	theme = th
@@ -250,8 +257,9 @@ func _build_ui() -> void:
 	header.add_child(titlebox)
 	var title := Label.new()
 	title.text = "물약 공방"
-	title.add_theme_font_size_override("font_size", 20)
+	title.add_theme_font_size_override("font_size", 21)
 	title.add_theme_color_override("font_color", GameState.col("text"))
+	_bold(title)
 	titlebox.add_child(title)
 	var subtitle := Label.new()
 	subtitle.text = "Your cozy work companion"
@@ -259,9 +267,10 @@ func _build_ui() -> void:
 	subtitle.add_theme_color_override("font_color", GameState.col("subtitle"))
 	titlebox.add_child(subtitle)
 	coins_label = Label.new()
-	coins_label.add_theme_font_size_override("font_size", 15)
+	coins_label.add_theme_font_size_override("font_size", 16)
 	coins_label.add_theme_color_override("font_color", GameState.col("gold"))
 	coins_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	_bold(coins_label)
 	header.add_child(coins_label)
 
 	# --- 레벨 / 경험치 ---
@@ -273,6 +282,7 @@ func _build_ui() -> void:
 	lv_label.add_theme_font_size_override("font_size", 13)
 	lv_label.add_theme_color_override("font_color", GameState.col("gold"))
 	lv_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	_bold(lv_label)
 	lv_row.add_child(lv_label)
 	xp_bar = ProgressBar.new()
 	xp_bar.min_value = 0.0
@@ -290,9 +300,10 @@ func _build_ui() -> void:
 
 	# --- 상태 (● 상태) ---
 	status_label = Label.new()
-	status_label.add_theme_font_size_override("font_size", 13)
+	status_label.add_theme_font_size_override("font_size", 14)
 	status_label.add_theme_color_override("font_color", GameState.col("success"))
 	status_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_bold(status_label)
 	vb.add_child(status_label)
 
 	# --- 진행 바 ---
@@ -347,6 +358,7 @@ func _build_ui() -> void:
 	brew_btn.focus_mode = Control.FOCUS_NONE
 	brew_btn.add_theme_font_size_override("font_size", 19)
 	_style_button(brew_btn, GameState.col("accent"), GameState.col("accent_text"), 14, 10, 12)
+	_bold(brew_btn)
 	brew_btn.pressed.connect(_on_brew_pressed)
 	vb.add_child(brew_btn)
 
@@ -358,28 +370,60 @@ func _build_ui() -> void:
 	cancel_btn.visible = false
 	vb.add_child(cancel_btn)
 
-	# --- 제작 시간(텍스트 입력) ---
+	# --- 제작 시간 (−/입력/+ 스테퍼) ---
 	var time_row := HBoxContainer.new()
-	time_row.add_theme_constant_override("separation", 6)
+	time_row.add_theme_constant_override("separation", 8)
 	vb.add_child(time_row)
 	var tlab := Label.new()
 	tlab.text = "제작 시간"
+	tlab.add_theme_font_size_override("font_size", 14)
 	tlab.add_theme_color_override("font_color", GameState.col("text_muted"))
 	tlab.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	tlab.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_bold(tlab)
 	time_row.add_child(tlab)
+
+	time_minus = Button.new()
+	time_minus.text = "−"
+	time_minus.custom_minimum_size = Vector2(38, 38)
+	time_minus.focus_mode = Control.FOCUS_NONE
+	time_minus.add_theme_font_size_override("font_size", 20)
+	_style_button(time_minus, GameState.col("slot"), GameState.col("text"), 12, 2, 2)
+	time_minus.pressed.connect(func(): _adjust_time(-5))
+	time_row.add_child(time_minus)
+
+	# 테두리 없는 소프트 라운드 입력 필드
+	var field := PanelContainer.new()
+	field.add_theme_stylebox_override("panel", _sb_card(GameState.col("panel"), 12))
+	time_row.add_child(field)
+	var field_h := HBoxContainer.new()
+	field_h.add_theme_constant_override("separation", 1)
+	field.add_child(field_h)
 	time_input = LineEdit.new()
 	time_input.text = "10"
-	time_input.alignment = HORIZONTAL_ALIGNMENT_RIGHT
-	time_input.custom_minimum_size = Vector2(70, 0)
+	time_input.alignment = HORIZONTAL_ALIGNMENT_CENTER
+	time_input.custom_minimum_size = Vector2(42, 0)
 	time_input.max_length = 3
+	time_input.add_theme_font_size_override("font_size", 16)
+	time_input.add_theme_stylebox_override("normal", _sb_plain(Color.TRANSPARENT, 0))
+	time_input.add_theme_stylebox_override("focus", _sb_plain(Color.TRANSPARENT, 0))
+	_bold(time_input)
 	time_input.text_changed.connect(_on_time_text_changed)
-	time_row.add_child(time_input)
-	var minlab := Label.new()
-	minlab.text = "분 (1~600)"
-	minlab.add_theme_color_override("font_color", GameState.col("text_muted"))
-	minlab.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-	minlab.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	time_row.add_child(minlab)
+	field_h.add_child(time_input)
+	var unit := Label.new()
+	unit.text = "분"
+	unit.add_theme_color_override("font_color", GameState.col("text_muted"))
+	unit.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	field_h.add_child(unit)
+
+	time_plus = Button.new()
+	time_plus.text = "+"
+	time_plus.custom_minimum_size = Vector2(38, 38)
+	time_plus.focus_mode = Control.FOCUS_NONE
+	time_plus.add_theme_font_size_override("font_size", 20)
+	_style_button(time_plus, GameState.col("accent"), GameState.col("accent_text"), 12, 2, 2)
+	time_plus.pressed.connect(func(): _adjust_time(5))
+	time_row.add_child(time_plus)
 
 	# --- 예상 등급 확률 ---
 	grade_hint = RichTextLabel.new()
@@ -401,8 +445,9 @@ func _build_ui() -> void:
 	# --- 재료 가방 ---
 	var bag_label := Label.new()
 	bag_label.text = "재료 가방"
-	bag_label.add_theme_font_size_override("font_size", 13)
+	bag_label.add_theme_font_size_override("font_size", 14)
 	bag_label.add_theme_color_override("font_color", GameState.col("text_muted"))
+	_bold(bag_label)
 	bag_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	vb.add_child(bag_label)
 
@@ -420,7 +465,9 @@ func _build_ui() -> void:
 		b.clip_text = true
 		b.focus_mode = Control.FOCUS_NONE
 		b.add_theme_font_size_override("font_size", 12)
-		b.add_theme_color_override("font_color", info.color)
+		b.add_theme_color_override("font_color", _readable(info.color))
+		b.add_theme_color_override("font_disabled_color", Color(0.55, 0.5, 0.42, 0.55))
+		_bold(b)
 		var cap_id: String = id
 		b.pressed.connect(func(): _on_add_ingredient(cap_id))
 		bag_grid.add_child(b)
@@ -452,6 +499,29 @@ func _load_character_tex() -> Texture2D:
 	if ResourceLoader.exists("res://assets/character.png"):
 		return load("res://assets/character.png")
 	return null
+
+## 컨트롤에 합성 볼드 폰트 적용
+func _bold(ctrl: Control) -> void:
+	if _bold_font == null:
+		return
+	if ctrl is RichTextLabel:
+		ctrl.add_theme_font_override("normal_font", _bold_font)
+	else:
+		ctrl.add_theme_font_override("font", _bold_font)
+
+## 재료/물약 색을 현재 테마 배경 대비 읽기 쉽게 보정
+func _readable(c: Color) -> Color:
+	if GameState.theme_mode == "light":
+		var lum := c.get_luminance()
+		if lum > 0.55:
+			return c.darkened(0.5)
+		if lum > 0.4:
+			return c.darkened(0.3)
+		return c.darkened(0.12)
+	else:
+		if c.get_luminance() < 0.42:
+			return c.lightened(0.3)
+		return c
 
 func _mk_icon_button(txt: String, cb: Callable) -> Button:
 	var b := Button.new()
@@ -547,6 +617,7 @@ func _build_overlay() -> void:
 	overlay_title = Label.new()
 	overlay_title.add_theme_font_size_override("font_size", 20)
 	overlay_title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_bold(overlay_title)
 	head.add_child(overlay_title)
 	head.add_child(_mk_icon_button("✕", func(): _close_panel()))
 
@@ -643,6 +714,15 @@ func _read_minutes() -> int:
 	m = clampi(m, 1, 600)
 	time_input.text = str(m)
 	return m
+
+func _adjust_time(delta: int) -> void:
+	if GameState.brew != null:
+		return
+	var t := time_input.text.strip_edges()
+	var m := clampi((int(t) if t.is_valid_int() else 10) + delta, 1, 600)
+	time_input.text = str(m)
+	time_input.caret_column = time_input.text.length()
+	_update_grade_hint()
 
 func _on_brew_pressed() -> void:
 	if GameState.brew != null:
@@ -751,7 +831,8 @@ func refresh_jar_slots() -> void:
 			var id: String = ings[i]
 			colors.append(Recipes.ingredient_color(id))
 			slot.text = "● " + Recipes.ingredient_name(id)
-			slot.add_theme_color_override("font_color", Recipes.ingredient_color(id))
+			slot.add_theme_color_override("font_color", _readable(Recipes.ingredient_color(id)))
+			_bold(slot)
 			if brewing:
 				slot.disabled = true
 			else:
@@ -772,6 +853,8 @@ func refresh_controls() -> void:
 	cancel_btn.visible = brewing
 	brew_btn.disabled = GameState.jar_ingredients.is_empty()
 	time_input.editable = not brewing
+	time_minus.disabled = brewing
+	time_plus.disabled = brewing
 	clear_btn.visible = (not brewing) and not GameState.jar_ingredients.is_empty()
 	var jar_full := GameState.jar_ingredients.size() >= GameState.MAX_INGREDIENTS
 	for id in bag_buttons.keys():
@@ -857,6 +940,7 @@ func _coin_header() -> void:
 	var cl := Label.new()
 	cl.text = "보유 코인: 🪙 %d" % GameState.coins
 	cl.add_theme_color_override("font_color", GameState.col("gold"))
+	_bold(cl)
 	overlay_content.add_child(cl)
 	overlay_content.add_child(_hsep())
 
@@ -884,7 +968,8 @@ func _fill_inventory() -> void:
 		n.add_theme_font_size_override("font_size", 16)
 		# 등급 ★ + 물약명 + 개수 (★ 색상으로 등급 구분)
 		n.text = "★ %s  %s  ×%d" % [Recipes.grade_name(grade), p.name, p.count]
-		n.add_theme_color_override("font_color", Recipes.grade_color(grade))
+		n.add_theme_color_override("font_color", _readable(Recipes.grade_color(grade)))
+		_bold(n)
 		box.add_child(n)
 		var d := Label.new()
 		d.text = p.get("desc", "")
@@ -958,10 +1043,11 @@ func _fill_recipes() -> void:
 		title.add_theme_font_size_override("font_size", 16)
 		if found:
 			title.text = "✔ " + r.name
-			title.add_theme_color_override("font_color", r.color)
+			title.add_theme_color_override("font_color", _readable(r.color))
 		else:
 			title.text = "❓ 미발견 물약"
-			title.add_theme_color_override("font_color", GameState.col("text_faint"))
+			title.add_theme_color_override("font_color", GameState.col("text_dim"))
+		_bold(title)
 		box.add_child(title)
 		var ings := []
 		for iid in r.ing:
@@ -1012,6 +1098,7 @@ func _fill_settings() -> void:
 	var reg_lbl := Label.new()
 	reg_lbl.text = "등록된 프로그램"
 	reg_lbl.add_theme_font_size_override("font_size", 16)
+	_bold(reg_lbl)
 	overlay_content.add_child(reg_lbl)
 
 	if GameState.registered_apps.is_empty():
@@ -1044,6 +1131,7 @@ func _fill_settings() -> void:
 	var test_lbl := Label.new()
 	test_lbl.text = "테스트 옵션"
 	test_lbl.add_theme_font_size_override("font_size", 16)
+	_bold(test_lbl)
 	overlay_content.add_child(test_lbl)
 
 	var force_cb := CheckBox.new()
@@ -1113,6 +1201,7 @@ func _fill_settings() -> void:
 	var win_lbl := Label.new()
 	win_lbl.text = "위젯 창"
 	win_lbl.add_theme_font_size_override("font_size", 16)
+	_bold(win_lbl)
 	overlay_content.add_child(win_lbl)
 
 	var hint := Label.new()
